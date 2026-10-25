@@ -1,0 +1,142 @@
+package com.fallbracelet.ui
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.fallbracelet.ble.BleScanner
+import com.fallbracelet.ble.BraceletConfig
+import com.fallbracelet.ble.Command
+import com.fallbracelet.ble.FoundDevice
+import com.fallbracelet.manager
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import java.io.File
+
+class AppViewModel(app: Application) : AndroidViewModel(app) {
+    private val m = app.manager
+    private val scanner = BleScanner(app)
+
+    val settings = m.appSettings
+    val link = m.connection.link
+    val status = m.connection.status
+    val config = m.connection.config
+    val events = m.events.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val recording = m.recording
+
+    // --- Scanning ------------------------------------------------------------------------
+
+    private val _found = MutableStateFlow<List<FoundDevice>>(emptyList())
+    val found: StateFlow<List<FoundDevice>> = _found.asStateFlow()
+    private val _scanError = MutableStateFlow<String?>(null)
+    val scanError: StateFlow<String?> = _scanError.asStateFlow()
+    private var scanJob: Job? = null
+
+    fun startScan() {
+        scanJob?.cancel()
+        _found.value = emptyList()
+        _scanError.value = null
+        scanJob = viewModelScope.launch {
+            scanner.scan()
+                .catch { _scanError.value = it.message }
+                .collect { d ->
+                    _found.value = (_found.value.filterNot { it.address == d.address } + d).sortedByDescending { it.rssi }
+                }
+        }
+    }
+
+    fun stopScan() {
+        scanJob?.cancel()
+    }
+
+    fun pair(d: FoundDevice) = viewModelScope.launch {
+        stopScan()
+        m.pair(d.address, d.name)
+    }
+
+    fun forget() = viewModelScope.launch { m.forget() }
+
+    // --- Bracelet ------------------------------------------------------------------------
+
+    fun command(c: Byte) = viewModelScope.launch { m.connection.sendCommand(c) }
+
+    private val _saveResult = MutableStateFlow<String?>(null)
+    val saveResult: StateFlow<String?> = _saveResult.asStateFlow()
+
+    fun saveConfig(c: BraceletConfig) = viewModelScope.launch {
+        val ok = m.connection.writeConfig(c)
+        if (ok) m.settings.setWearerName(c.wearerName)
+        _saveResult.value = if (ok) "Saved to the bracelet" else "Couldn't reach the bracelet"
+    }
+
+    fun clearSaveResult() { _saveResult.value = null }
+
+    /** After a permission or Bluetooth prompt: try again with whatever was granted. */
+    fun retryConnect() {
+        m.retryConnect()
+        if (settings.value.deviceAddress == null) startScan()
+    }
+
+    // --- Phone settings ------------------------------------------------------------------
+
+    fun setCaregivers(text: String) = viewModelScope.launch {
+        m.settings.setCaregivers(text.split('\n', ',').map { it.trim() }.filter { it.isNotEmpty() })
+    }
+    fun setSms(on: Boolean) = viewModelScope.launch { m.settings.setSmsEnabled(on) }
+    fun setSmsCheckins(on: Boolean) = viewModelScope.launch { m.settings.setSmsCheckins(on) }
+    fun setOfflineAlert(min: Int) = viewModelScope.launch { m.settings.setOfflineAlertMin(min) }
+    fun clearHistory() = viewModelScope.launch { m.clearHistory() }
+
+    // --- Live stream ---------------------------------------------------------------------
+
+    /** The last 3 s of SVM at 100 Hz, oldest first. */
+    private val _svm = MutableStateFlow(FloatArray(0))
+    val svm: StateFlow<FloatArray> = _svm.asStateFlow()
+
+    private val _recordings = MutableStateFlow<List<File>>(emptyList())
+    val recordings: StateFlow<List<File>> = _recordings.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            val ring = ArrayDeque<Float>(WINDOW)
+            m.connection.stream.collect { samples ->
+                samples.forEach {
+                    if (ring.size == WINDOW) ring.removeFirst()
+                    ring.addLast(it.svm)
+                }
+                _svm.value = ring.toFloatArray()
+            }
+        }
+        refreshRecordings()
+    }
+
+    fun setStreaming(on: Boolean) = command(if (on) Command.STREAM_ON else Command.STREAM_OFF)
+
+    fun startRecording(label: String) {
+        m.startRecording(label)
+        refreshRecordings()
+    }
+
+    fun stopRecording() {
+        m.stopRecording()
+        refreshRecordings()
+    }
+
+    fun deleteRecording(f: File) {
+        f.delete()
+        refreshRecordings()
+    }
+
+    fun refreshRecordings() {
+        _recordings.value = m.recorder.list()
+    }
+
+    companion object {
+        const val WINDOW = 300
+    }
+}
