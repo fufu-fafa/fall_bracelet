@@ -56,6 +56,12 @@ class BraceletService : LifecycleService() {
 
     private var started = false
 
+    override fun onDestroy() {
+        super.onDestroy()
+        // The status updater can re-post after stopForeground; clear it so no stale notice stays.
+        NotificationManagerCompat.from(this).cancel(AlertDispatcher.SERVICE_ID)
+    }
+
     private fun notification(text: String) = NotificationCompat.Builder(this, AlertDispatcher.CH_SERVICE)
         .setSmallIcon(R.drawable.ic_stat_bracelet)
         .setContentTitle("Fall bracelet")

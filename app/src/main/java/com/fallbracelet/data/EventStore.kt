@@ -33,6 +33,9 @@ data class EventEntity(
     val message: String,
     /** When the relay accepted it, epoch ms; null while it waits in the upload queue. */
     val uploadedAt: Long? = null,
+    /** The caregiver who acknowledged this alarm on the relay, and when. */
+    val ackedBy: String? = null,
+    val ackedAt: Long? = null,
 )
 
 @Dao
@@ -47,6 +50,13 @@ interface EventDao : UploadQueue {
     @Query("UPDATE events SET uploadedAt = :at WHERE id = :id")
     override suspend fun markUploaded(id: Long, at: Long)
 
+    @Query("UPDATE events SET ackedBy = :by, ackedAt = :at WHERE deviceAddress = :deviceAddress AND seq = :seq")
+    suspend fun setAck(deviceAddress: String, seq: Long, by: String, at: Long)
+
+    /** Alarms the relay has but no caregiver has acknowledged yet. */
+    @Query("SELECT COUNT(*) FROM events WHERE type IN ('FALL', 'SOS') AND uploadedAt IS NOT NULL AND ackedAt IS NULL AND receivedAt > :since")
+    suspend fun unackedAlarms(since: Long): Int
+
     @Query("SELECT * FROM events ORDER BY occurredAt DESC, id DESC LIMIT 500")
     fun recent(): Flow<List<EventEntity>>
 
@@ -57,14 +67,14 @@ interface EventDao : UploadQueue {
     suspend fun clear()
 }
 
-@Database(entities = [EventEntity::class], version = 2, exportSchema = false)
+@Database(entities = [EventEntity::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun events(): EventDao
 
     companion object {
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "bracelet.db")
-                .addMigrations(SMS_TO_UPLOAD_QUEUE)
+                .addMigrations(SMS_TO_UPLOAD_QUEUE, ADD_ACKS)
                 .build()
 
         /**
@@ -89,6 +99,14 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("DROP TABLE events")
                 db.execSQL("ALTER TABLE events_new RENAME TO events")
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_events_deviceAddress_seq ON events (deviceAddress, seq)")
+            }
+        }
+
+        /** v3 records which caregiver saw an alarm ("Seen by Sara at 14:33"). */
+        val ADD_ACKS = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE events ADD COLUMN ackedBy TEXT")
+                db.execSQL("ALTER TABLE events ADD COLUMN ackedAt INTEGER")
             }
         }
     }

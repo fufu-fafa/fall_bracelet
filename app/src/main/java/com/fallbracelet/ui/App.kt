@@ -57,7 +57,7 @@ fun App(vm: AppViewModel, enableBluetooth: () -> Unit) {
     val settings by vm.settings.collectAsState()
     when (settings.mode) {
         null -> { ModeScreen(vm::setMode); return }
-        AppMode.CAREGIVER -> { CaregiverScreen { vm.setMode(AppMode.WEARER) }; return }
+        AppMode.CAREGIVER -> { CaregiverScreen(vm); return }
         AppMode.WEARER -> Unit
     }
     if (settings.deviceAddress == null) {

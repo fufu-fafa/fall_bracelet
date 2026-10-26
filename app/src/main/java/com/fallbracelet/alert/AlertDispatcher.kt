@@ -17,6 +17,9 @@ import androidx.core.content.ContextCompat
 import com.fallbracelet.R
 import com.fallbracelet.ble.BraceletEvent
 import com.fallbracelet.ble.EventType
+import com.fallbracelet.caregiver.AckReceiver
+import com.fallbracelet.caregiver.AlarmActivity
+import com.fallbracelet.caregiver.RemoteEvent
 import com.fallbracelet.ui.MainActivity
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -100,6 +103,93 @@ class AlertDispatcher(private val context: Context) {
 
     fun clearOffline() = NotificationManagerCompat.from(context).cancel(OFFLINE_ID)
 
+    // --- Caregiver mode ------------------------------------------------------------------
+
+    /** FALL or SOS from a wearer: full-screen, rings until acknowledged (APP-15). */
+    fun caregiverAlarm(e: RemoteEvent, wearer: String, escalated: Boolean) {
+        val title = (if (e.type == EventType.FALL) "Fall detected" else "SOS") + " — ${wearer.ifBlank { "Wearer" }}"
+        val text = (if (escalated) "Still not acknowledged. " else "") + e.message
+        val open = alarmScreen(e, wearer)
+        val n = NotificationCompat.Builder(context, CH_ALARM)
+            .setSmallIcon(R.drawable.ic_stat_bracelet)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setFullScreenIntent(open, true)
+            .setContentIntent(open)
+            .setOngoing(true)
+            .addAction(0, "Acknowledge", ackIntent(e.id))
+            .build()
+        n.flags = n.flags or android.app.Notification.FLAG_INSISTENT // keep ringing until acknowledged
+        post(alarmId(e.id), n)
+        // With the app on screen Android shows a banner instead of the full-screen alarm; open it ourselves.
+        if (appInForeground()) runCatching { context.startActivity(AlarmActivity.intent(context, e, wearer)) }
+    }
+
+    /** TEST rings once, labelled as a test. */
+    fun caregiverTest(e: RemoteEvent, wearer: String) {
+        val n = NotificationCompat.Builder(context, CH_ALARM)
+            .setSmallIcon(R.drawable.ic_stat_bracelet)
+            .setContentTitle("TEST alert — ${wearer.ifBlank { "Wearer" }}")
+            .setContentText("This is a test. ${e.message}")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(openApp(alarmId(e.id)))
+            .setAutoCancel(true)
+            .addAction(0, "Acknowledge", ackIntent(e.id))
+            .build()
+        post(alarmId(e.id), n)
+    }
+
+    /** LOW_BATTERY and OFF: a normal notification. */
+    fun caregiverInfo(e: RemoteEvent, wearer: String) {
+        val n = NotificationCompat.Builder(context, CH_INFO)
+            .setSmallIcon(R.drawable.ic_stat_bracelet)
+            .setContentTitle("${e.type.label} — ${wearer.ifBlank { "Wearer" }}")
+            .setContentText(e.message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(e.message))
+            .setContentIntent(openApp(INFO_BASE + (e.id % 100_000).toInt()))
+            .setAutoCancel(true)
+            .build()
+        post(INFO_BASE + (e.id % 100_000).toInt(), n)
+    }
+
+    fun cancelCaregiverAlarm(eventId: Long) = NotificationManagerCompat.from(context).cancel(alarmId(eventId))
+
+    fun notifyWearerOffline(wearerId: Long, name: String) {
+        val n = NotificationCompat.Builder(context, CH_INFO)
+            .setSmallIcon(R.drawable.ic_stat_bracelet)
+            .setContentTitle("${name.ifBlank { "Wearer" }}'s phone is offline")
+            .setContentText("No contact for 15 min. Alerts can't get through until it's back.")
+            .setContentIntent(openApp(OFFLINE_BASE + wearerId.toInt()))
+            .setAutoCancel(true)
+            .build()
+        post(OFFLINE_BASE + wearerId.toInt(), n)
+    }
+
+    fun clearWearerOffline(wearerId: Long) = NotificationManagerCompat.from(context).cancel(OFFLINE_BASE + wearerId.toInt())
+
+    private fun appInForeground(): Boolean {
+        val info = android.app.ActivityManager.RunningAppProcessInfo()
+        android.app.ActivityManager.getMyMemoryState(info)
+        return info.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+    }
+
+    private fun alarmId(eventId: Long) = ALARM_BASE + (eventId % 100_000).toInt()
+
+    private fun alarmScreen(e: RemoteEvent, wearer: String): PendingIntent = PendingIntent.getActivity(
+        context, alarmId(e.id),
+        AlarmActivity.intent(context, e, wearer),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+    private fun ackIntent(eventId: Long): PendingIntent = PendingIntent.getBroadcast(
+        context, alarmId(eventId),
+        Intent(context, AckReceiver::class.java).putExtra(AckReceiver.EXTRA_EVENT_ID, eventId),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
     private fun openApp(requestCode: Int): PendingIntent = PendingIntent.getActivity(
         context, requestCode,
         Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
@@ -120,5 +210,9 @@ class AlertDispatcher(private val context: Context) {
         const val CH_SERVICE = "service"
         const val SERVICE_ID = 1
         const val OFFLINE_ID = 2
+        const val CAREGIVER_SERVICE_ID = 3
+        private const val ALARM_BASE = 100_000
+        private const val INFO_BASE = 200_000
+        private const val OFFLINE_BASE = 300_000
     }
 }

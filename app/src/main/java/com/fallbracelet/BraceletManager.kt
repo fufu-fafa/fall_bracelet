@@ -16,11 +16,10 @@ import com.fallbracelet.data.AppDatabase
 import com.fallbracelet.data.AppMode
 import com.fallbracelet.data.AppSettings
 import com.fallbracelet.data.EventEntity
-import com.fallbracelet.data.EventRelay
-import com.fallbracelet.data.NoRelay
 import com.fallbracelet.data.Recorder
 import com.fallbracelet.data.SettingsRepository
 import com.fallbracelet.data.Uploader
+import com.fallbracelet.relay.WearerRelay
 import com.fallbracelet.service.BraceletService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -46,15 +45,23 @@ class BraceletManager(
     private val db: AppDatabase,
     val alerts: AlertDispatcher,
     private val scope: CoroutineScope,
-    /** Firebase once it is set up; until then events wait in the local upload queue. */
-    val relay: EventRelay = NoRelay,
 ) {
     val connection = BraceletConnection(context, scope)
     val recorder = Recorder(context)
     val events = db.events().recent()
     val lastCheckin = db.events().lastCheckin()
-    private val uploader = Uploader(db.events(), relay)
     val appSettings: StateFlow<AppSettings> = settings.settings.stateIn(scope, SharingStarted.Eagerly, AppSettings())
+
+    /** The Pi relay; events wait in the local upload queue whenever it can't be reached. */
+    val relay = WearerRelay(settings) { appSettings.value }
+    private val uploader = Uploader(db.events(), relay)
+
+    private val _relayError = MutableStateFlow<String?>(null)
+    /** Null when the last relay call worked. */
+    val relayError: StateFlow<String?> = _relayError.asStateFlow()
+    private val _caregiverCount = MutableStateFlow<Int?>(null)
+    /** Linked caregivers, as of the last heartbeat; null before the first one. */
+    val caregiverCount: StateFlow<Int?> = _caregiverCount.asStateFlow()
 
     private val _recording = MutableStateFlow<File?>(null)
     val recording: StateFlow<File?> = _recording.asStateFlow()
@@ -82,12 +89,47 @@ class BraceletManager(
         }
         scope.launch { connection.status.filterNotNull().collect { lastKnownState = it.state } }
         scope.launch { watchOffline() }
+        scope.launch { relayLoop() }
         scope.launch {
-            while (true) {
-                runCatching { uploader.flush() }
-                delay(60_000)
-            }
+            // A new wearer name on the bracelet is the name caregivers see.
+            appSettings.map { it.wearerName }.distinctUntilChanged().collect { runCatching { relay.rename(it) } }
         }
+    }
+
+    /** Register once, then upload queued events every minute and heartbeat every 5 min (APP-4, APP-11). */
+    private suspend fun relayLoop() {
+        var lastHeartbeat = 0L
+        while (true) {
+            // Read the stored settings, not the StateFlow's initial placeholder.
+            val s = settings.settings.first()
+            if (s.mode == AppMode.WEARER && s.relayUrl.isNotBlank()) {
+                val result = runCatching {
+                    relay.ensureRegistered()
+                    uploader.flush()
+                    // While an alarm waits for a caregiver, check every minute so "Seen by" shows quickly.
+                    val waiting = db.events().unackedAlarms(System.currentTimeMillis() - 30 * 60_000) > 0
+                    if (waiting || System.currentTimeMillis() - lastHeartbeat >= HEARTBEAT_MS) {
+                        heartbeat()
+                        lastHeartbeat = System.currentTimeMillis()
+                    }
+                }
+                _relayError.value = result.exceptionOrNull()?.message
+            }
+            delay(60_000)
+        }
+    }
+
+    private suspend fun heartbeat() {
+        val s = appSettings.value
+        val reply = relay.heartbeat(connection.status.value, connection.link.value == LinkState.CONNECTED, s.acksSince)
+        for (a in reply.acks) db.events().setAck(a.deviceAddress, a.seq, a.by, a.at)
+        reply.acks.maxOfOrNull { it.at }?.let { settings.setAcksSince(it) }
+        _caregiverCount.value = reply.caregivers
+    }
+
+    /** After pairing, or when a heartbeat is wanted right now (e.g. a caregiver just linked). */
+    fun syncNow() = scope.launch {
+        _relayError.value = runCatching { relay.ensureRegistered(); uploader.flush(); heartbeat() }.exceptionOrNull()?.message
     }
 
     /** Survives disconnects: a bracelet that went Idle or Off on purpose isn't "lost". */
@@ -150,7 +192,7 @@ class BraceletManager(
             alerts.notify(e.type, text, NOTIFY_BASE + (e.seq % 10_000).toInt())
         }
         connection.ack(e.seq)
-        runCatching { uploader.flush() }
+        _relayError.value = runCatching { uploader.flush() }.exceptionOrNull()?.message
     }
 
     private suspend fun watchOffline() {
@@ -180,5 +222,6 @@ class BraceletManager(
 
     private companion object {
         const val NOTIFY_BASE = 1000
+        const val HEARTBEAT_MS = 5 * 60_000L
     }
 }

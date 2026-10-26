@@ -6,6 +6,8 @@ import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.app.NotificationManager
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.foundation.layout.Spacer
@@ -35,8 +37,11 @@ import kotlinx.coroutines.delay
 /** Something that stops alerts getting out, with the fix if the app can offer one. */
 data class SetupProblem(val text: String, val fixLabel: String? = null, val fix: ((Context) -> Unit)? = null)
 
-fun setupProblems(context: Context, relayConfigured: Boolean): List<SetupProblem> = buildList {
-    if (!context.manager.canConnect()) {
+/** What the wearer phone last learned from the relay. */
+data class RelayHealth(val url: String, val registered: Boolean, val error: String?, val caregivers: Int?)
+
+fun setupProblems(context: Context, relay: RelayHealth?): List<SetupProblem> = buildList {
+    if (relay != null && !context.manager.canConnect()) {
         add(SetupProblem("Nearby devices permission is off, so the app can't reach the bracelet.", "Open app settings", ::openAppSettings))
     }
     if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
@@ -44,14 +49,27 @@ fun setupProblems(context: Context, relayConfigured: Boolean): List<SetupProblem
     }
     val power = context.getSystemService(PowerManager::class.java)
     if (!power.isIgnoringBatteryOptimizations(context.packageName)) {
-        add(SetupProblem("Battery optimisation can stop the app in the background and drop the bracelet.", "Allow background use", ::requestBatteryExemption))
+        add(SetupProblem("Battery optimisation can stop the app in the background, so alerts can be missed.", "Allow background use", ::requestBatteryExemption))
+    }
+    if (Build.VERSION.SDK_INT >= 34 && !context.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()) {
+        add(SetupProblem("Full-screen alarms are blocked, so a fall only shows as a notification.", "Allow full-screen alarms", ::openFullScreenSettings))
     }
     if (!hasInternet(context)) {
         add(SetupProblem("No internet connection, so alerts can't reach caregivers."))
     }
-    if (!relayConfigured) {
-        add(SetupProblem("Caregiver alerts aren't set up yet: there's no relay or sign-in, and no caregiver is linked. Alerts stay on this phone."))
+    when {
+        relay == null -> Unit // caregiver phone: its own status card covers the relay
+        relay.url.isBlank() -> add(SetupProblem("No relay address set in Settings, so alerts stay on this phone."))
+        relay.error != null -> add(SetupProblem("Can't reach the relay (${relay.error}). Events wait on this phone and go out when it's back."))
+        !relay.registered -> add(SetupProblem("Connecting to the relay…"))
+        relay.caregivers == 0 -> add(SetupProblem("No caregiver is linked yet, so nobody else gets alerts. Invite one in Settings."))
     }
+}
+
+private fun openFullScreenSettings(context: Context) {
+    runCatching {
+        context.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:${context.packageName}")))
+    }.onFailure { openAppSettings(context) }
 }
 
 private fun hasInternet(context: Context): Boolean {
@@ -77,9 +95,9 @@ private fun openAppSettings(context: Context) {
     context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
 }
 
-/** Lists what stops alerts getting out (APP-10). Re-checked on resume and every 15 s. */
+/** Lists what stops alerts getting out (APP-10). Re-checked on resume and every 15 s. Null relay = caregiver phone. */
 @Composable
-fun SetupWarnings(relayConfigured: Boolean) {
+fun SetupWarnings(relay: RelayHealth?) {
     val context = LocalContext.current
     var tick by remember { mutableIntStateOf(0) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -91,7 +109,7 @@ fun SetupWarnings(relayConfigured: Boolean) {
     LaunchedEffect(Unit) {
         while (true) { delay(15_000); tick++ }
     }
-    val problems = remember(tick, relayConfigured) { setupProblems(context, relayConfigured) }
+    val problems = remember(tick, relay) { setupProblems(context, relay) }
     if (problems.isEmpty()) return
 
     Card(background = Tokens.WrongBg, border = Tokens.Wrong) {

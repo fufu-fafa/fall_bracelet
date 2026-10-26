@@ -45,7 +45,7 @@ fun HomeScreen(vm: AppViewModel) {
         val who = settings.wearerName.ifBlank { null }?.let { "$it's bracelet" } ?: (settings.deviceName ?: "Bracelet")
         ScreenTitle(who)
         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SetupWarnings(vm.relayConfigured)
+            SetupWarnings(vm.relayHealth.collectAsState().value)
             LinkCard(link, settings.deviceName, settings.lastSeenAt)
             status?.let { s ->
                 if (s.state == BraceletState.COUNTDOWN) CountdownCard(s) { vm.command(Command.CANCEL) }

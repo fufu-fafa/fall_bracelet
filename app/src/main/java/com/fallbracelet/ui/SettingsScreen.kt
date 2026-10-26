@@ -55,16 +55,7 @@ fun SettingsScreen(vm: AppViewModel) {
         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             BraceletSettings(config, connected, saveResult, onSave = vm::saveConfig, onShown = vm::clearSaveResult)
 
-            Card {
-                SectionLabel("Caregivers")
-                Text("No caregivers linked yet.")
-                Text(
-                    "Caregivers get alarms in the FallBracelet app on their own phone, through the relay. " +
-                        "Inviting them by QR code or invite code arrives once the relay is set up.",
-                    color = AppTheme.extra.muted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
+            CaregiversCard(vm)
 
             Card {
                 SectionLabel("Out-of-range warning")
@@ -208,4 +199,60 @@ private fun DeviceActions(vm: AppViewModel, connected: Boolean, name: String?, a
         confirmButton = { TextButton(onClick = { action(); confirm = null }) { Text("Confirm", color = Tokens.Wrong) } },
         dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
     )
+}
+
+/** Relay address, invites and linked caregivers (APP-9, APP-14). */
+@Composable
+private fun CaregiversCard(vm: AppViewModel) {
+    val settings by vm.settings.collectAsState()
+    val invite by vm.invite.collectAsState()
+    val caregivers by vm.caregivers.collectAsState()
+    val message by vm.relayMessage.collectAsState()
+    val health by vm.relayHealth.collectAsState()
+    var url by remember(settings.relayUrl) { mutableStateOf(settings.relayUrl) }
+    LaunchedEffect(settings.wearerToken, health?.caregivers) { vm.refreshCaregivers() }
+
+    Card {
+        SectionLabel("Caregivers")
+        Text(
+            "Linked caregivers get alarms in the FallBracelet app on their own phone, through the relay on the Raspberry Pi.",
+            color = AppTheme.extra.muted, style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(12.dp))
+        caregivers.forEach { c ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(c.name)
+                    Text("Linked ${relativeTime(c.linkedAt)}", color = AppTheme.extra.muted, style = MaterialTheme.typography.bodySmall)
+                }
+                TextButton(onClick = { vm.removeCaregiver(c.id) }) { Text("Remove", color = Tokens.Wrong) }
+            }
+        }
+        if (caregivers.isEmpty() && settings.wearerToken != null) Text("No caregivers linked yet.")
+        Spacer(Modifier.height(8.dp))
+        Button(onClick = vm::newInvite, enabled = settings.relayUrl.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+            Text("Invite a caregiver")
+        }
+        invite?.let { inv ->
+            if (inv.expiresAt > System.currentTimeMillis()) {
+                Spacer(Modifier.height(8.dp))
+                Text("Invite code", color = AppTheme.extra.muted, style = MaterialTheme.typography.bodySmall)
+                Text(inv.code.chunked(3).joinToString(" "), style = MaterialTheme.typography.headlineMedium, fontFamily = Mono)
+                Text(
+                    "On the caregiver's phone, choose \"I'm a caregiver\" and type this code. It works once and expires ${relativeTime(inv.expiresAt).replaceFirstChar { it.lowercase() }}.",
+                    color = AppTheme.extra.muted, style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+        message?.let { Text(it, color = Tokens.Wrong) }
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = url, onValueChange = { url = it },
+            label = { Text("Relay address") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+        )
+        if (url.trim() != settings.relayUrl) {
+            OutlinedButton(onClick = { vm.setRelayUrl(url) }) { Text("Save address") }
+        }
+    }
 }

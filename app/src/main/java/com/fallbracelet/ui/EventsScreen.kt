@@ -23,14 +23,22 @@ import com.fallbracelet.ui.theme.AppTheme
 import com.fallbracelet.ui.theme.Tokens
 import java.text.SimpleDateFormat
 import java.util.Date
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
 import java.util.Locale
 
 @Composable
 fun EventsScreen(vm: AppViewModel) {
     val events by vm.events.collectAsState()
+    val list = rememberLazyListState()
+    // A new event lands above the first visible one; follow it if the list was at the top.
+    LaunchedEffect(events.firstOrNull()?.id) {
+        if (list.firstVisibleItemIndex <= 1) list.animateScrollToItem(0)
+    }
     Column {
         ScreenTitle("Events", "Everything the bracelet reported, newest first.")
         LazyColumn(
+            state = list,
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -62,6 +70,9 @@ fun EventLine(e: EventEntity, full: Boolean = false) {
         }
         Spacer(Modifier.size(4.dp))
         Text(e.message, style = MaterialTheme.typography.bodyMedium)
+        if (e.ackedBy != null) {
+            Text("Seen by ${e.ackedBy} ${e.ackedAt?.let { relativeTime(it) } ?: ""}", color = Tokens.Correct, style = MaterialTheme.typography.bodySmall)
+        }
         if (full) {
             if (e.receivedAt - e.occurredAt > 60_000) {
                 Text("Received ${relativeTime(e.receivedAt)} (delivered late)", color = AppTheme.extra.muted, style = MaterialTheme.typography.bodySmall)
