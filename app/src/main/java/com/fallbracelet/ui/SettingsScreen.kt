@@ -251,8 +251,12 @@ private fun CaregiversCard(vm: AppViewModel) {
             label = { Text("Relay address") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         )
-        if (url.trim() != settings.relayUrl) {
-            OutlinedButton(onClick = { vm.setRelayUrl(url) }) { Text("Save address") }
+        val finding by vm.finding.collectAsState()
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = vm::findRelay, enabled = !finding) { Text(if (finding) "Searching…" else "Find relay on this WiFi") }
+            if (url.trim() != settings.relayUrl) {
+                OutlinedButton(onClick = { vm.setRelayUrl(url) }) { Text("Save") }
+            }
         }
     }
 }

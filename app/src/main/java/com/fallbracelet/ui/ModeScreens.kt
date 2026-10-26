@@ -140,6 +140,9 @@ private fun LinkCard(vm: AppViewModel, relayUrl: String, savedName: String, onDo
             label = { Text("Relay address") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         )
+        val finding by vm.finding.collectAsState()
+        LaunchedEffect(relayUrl) { url = relayUrl } // "Find relay" updates the stored address
+        OutlinedButton(onClick = vm::findRelay, enabled = !finding) { Text(if (finding) "Searching…" else "Find relay on this WiFi") }
         Spacer(Modifier.height(8.dp))
         Button(
             onClick = { vm.link(url, code, name) },

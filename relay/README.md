@@ -22,6 +22,11 @@ sudo systemctl enable --now fall-bracelet-relay
 For now the relay only answers phones on the home network: requests from public addresses get
 `403`. Set `LAN_ONLY=0` once it sits behind HTTPS.
 
+**Changing WiFi (e.g. a phone hotspot at a demo):** join the Pi to the new network. The app finds
+the relay by itself: when its address stops answering, each phone asks every address on its own
+WiFi for `/v1/health` and switches to the one that replies with this relay's `relayId`, keeping its
+links. Settings and the caregiver link screen also have "Find relay on this WiFi".
+
 Debug builds of the app point at `http://192.168.0.104:8787` (`app/src/debug/res/values/relay.xml`)
 and allow plain HTTP. Anything outside the home network needs HTTPS, e.g. a Cloudflare Tunnel.
 

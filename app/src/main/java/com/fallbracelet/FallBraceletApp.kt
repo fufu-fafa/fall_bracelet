@@ -27,7 +27,7 @@ class FallBraceletApp : Application() {
             alerts = alerts,
             scope = scope,
         )
-        caregiver = CaregiverManager(this, settings, alerts, scope) { manager.appSettings.value }
+        caregiver = CaregiverManager(this, settings, alerts, scope, manager.finder) { manager.appSettings.value }
         manager.start()
         caregiver.start()
     }

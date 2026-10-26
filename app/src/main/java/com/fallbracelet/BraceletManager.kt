@@ -19,6 +19,8 @@ import com.fallbracelet.data.EventEntity
 import com.fallbracelet.data.Recorder
 import com.fallbracelet.data.SettingsRepository
 import com.fallbracelet.data.Uploader
+import com.fallbracelet.relay.RelayDiscovery
+import com.fallbracelet.relay.RelayFinder
 import com.fallbracelet.relay.WearerRelay
 import com.fallbracelet.service.BraceletService
 import kotlinx.coroutines.CoroutineScope
@@ -54,6 +56,8 @@ class BraceletManager(
 
     /** The Pi relay; events wait in the local upload queue whenever it can't be reached. */
     val relay = WearerRelay(settings) { appSettings.value }
+    /** Re-finds the Pi when it moves to another WiFi (e.g. a phone hotspot at the pitch). */
+    val finder = RelayFinder(settings) { appSettings.value }
     private val uploader = Uploader(db.events(), relay)
 
     private val _relayError = MutableStateFlow<String?>(null)
@@ -102,7 +106,11 @@ class BraceletManager(
         while (true) {
             // Read the stored settings, not the StateFlow's initial placeholder.
             val s = settings.settings.first()
-            if (s.mode == AppMode.WEARER && s.relayUrl.isNotBlank()) {
+            if (s.mode == AppMode.WEARER) {
+                val reachable = s.relayUrl.isNotBlank() && RelayDiscovery.check(s.relayUrl) != null
+                if (!reachable && finder.afterFailure() != null) {
+                    delay(2_000) // let the new address land in settings, then carry on below
+                }
                 val result = runCatching {
                     relay.ensureRegistered()
                     uploader.flush()

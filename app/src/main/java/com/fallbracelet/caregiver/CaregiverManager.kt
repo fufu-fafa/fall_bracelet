@@ -10,6 +10,8 @@ import com.fallbracelet.data.AppMode
 import com.fallbracelet.data.AppSettings
 import com.fallbracelet.data.SettingsRepository
 import com.fallbracelet.relay.RelayClient
+import com.fallbracelet.relay.RelayDiscovery
+import com.fallbracelet.relay.RelayFinder
 import com.fallbracelet.relay.RelayException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -96,6 +98,7 @@ class CaregiverManager(
     private val settings: SettingsRepository,
     private val alerts: AlertDispatcher,
     private val scope: CoroutineScope,
+    private val finder: RelayFinder,
     private val current: () -> AppSettings,
 ) {
     private val _wearers = MutableStateFlow<List<WatchedWearer>>(emptyList())
@@ -127,13 +130,16 @@ class CaregiverManager(
 
     /** Links to a wearer with their invite code. A phone already linked keeps its key and follows one more. */
     suspend fun link(relayUrl: String, code: String, name: String): Result<String> = runCatching {
-        if (relayUrl.trim() != current().relayUrl) settings.setRelayUrl(relayUrl)
+        if (relayUrl.trim() != current().relayUrl) settings.setRelay(relayUrl, RelayDiscovery.check(relayUrl.trim())?.relayId)
         val token = current().caregiverToken
         val r = RelayClient(relayUrl.trim(), token).post("/v1/link", JSONObject().put("code", code.trim()).put("name", name.trim()))
         settings.setCaregiver(r.optString("token").takeIf { it.isNotEmpty() && it != "null" }, name.trim())
         refresh()
         r.getJSONObject("wearer").getString("name")
     }.onFailure { Log.w(TAG, "link failed", it) }
+
+    /** "Find relay" on the link screen: scans the WiFi and returns the address it found. */
+    suspend fun findRelay(): String? = finder.findNow()?.url
 
     suspend fun refresh() {
         val a = client().get("/v1/dashboard").getJSONArray("wearers")
@@ -159,8 +165,11 @@ class CaregiverManager(
                 backoff = 2_000L
             } catch (e: RelayException) {
                 _error.value = if (e.status == 401) "This phone's link was removed. Link again." else "Relay unreachable: ${e.message}"
+                // Found at a new address: the settings change restarts the stream from start().
+                if (e.status == 0 && finder.afterFailure()?.url.let { it != null && it != url }) return
             } catch (e: Exception) {
                 _error.value = "Relay unreachable: ${e.message}"
+                if (finder.afterFailure()?.url.let { it != null && it != url }) return
             }
             _stream.value = StreamState.CONNECTING
             delay(backoff)

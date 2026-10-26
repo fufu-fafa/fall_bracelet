@@ -27,6 +27,8 @@ data class AppSettings(
     val lastSeenAt: Long = 0,
     /** The Pi relay, e.g. http://192.168.0.104:8787; blank = no relay. */
     val relayUrl: String = "",
+    /** The relay's own id, so a new address for the same Pi keeps this phone's links. */
+    val relayId: String? = null,
     /** This phone's key as a wearer on the relay, once registered. */
     val wearerToken: String? = null,
     /** This phone's key as a caregiver on the relay, once linked. */
@@ -52,6 +54,7 @@ class SettingsRepository(private val context: Context) {
         val offline = intPreferencesKey("offline_alert_min")
         val lastSeen = longPreferencesKey("last_seen_at")
         val relayUrl = stringPreferencesKey("relay_url")
+        val relayId = stringPreferencesKey("relay_id")
         val wearerToken = stringPreferencesKey("wearer_token")
         val caregiverToken = stringPreferencesKey("caregiver_token")
         val caregiverName = stringPreferencesKey("caregiver_name")
@@ -76,6 +79,7 @@ class SettingsRepository(private val context: Context) {
             offlineAlertMin = p[Keys.offline] ?: 30,
             lastSeenAt = p[Keys.lastSeen] ?: 0,
             relayUrl = p[Keys.relayUrl] ?: defaultRelayUrl,
+            relayId = p[Keys.relayId],
             wearerToken = p[Keys.wearerToken],
             caregiverToken = p[Keys.caregiverToken],
             caregiverName = p[Keys.caregiverName] ?: "",
@@ -95,12 +99,19 @@ class SettingsRepository(private val context: Context) {
     suspend fun setOfflineAlertMin(min: Int) = edit { it[Keys.offline] = min }
     suspend fun setLastSeen(at: Long) = edit { it[Keys.lastSeen] = at }
 
-    /** A different relay means different accounts, so the old keys go. */
-    suspend fun setRelayUrl(url: String) = edit {
-        if (url.trim() != (it[Keys.relayUrl] ?: defaultRelayUrl)) {
+    /**
+     * Points the app at a relay. The same relay at a new address (a different WiFi) keeps this
+     * phone's links; only a relay known to be a different one starts over. An address that can't
+     * be reached right now (relayId null) keeps them too.
+     */
+    suspend fun setRelay(url: String, relayId: String?) = edit {
+        val known = it[Keys.relayId]
+        val sameRelay = relayId == null || known == null || known == relayId
+        if (!sameRelay) {
             it.remove(Keys.wearerToken); it.remove(Keys.caregiverToken); it.remove(Keys.acksSince); it.remove(Keys.lastStreamEventId)
         }
         it[Keys.relayUrl] = url.trim()
+        if (relayId != null) it[Keys.relayId] = relayId
     }
     suspend fun setWearerToken(token: String) = edit { it[Keys.wearerToken] = token }
     suspend fun setCaregiver(token: String?, name: String) = edit {

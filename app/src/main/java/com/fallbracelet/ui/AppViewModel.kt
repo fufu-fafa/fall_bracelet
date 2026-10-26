@@ -10,6 +10,7 @@ import com.fallbracelet.ble.FoundDevice
 import com.fallbracelet.data.AppMode
 import com.fallbracelet.caregiver
 import com.fallbracelet.relay.Invite
+import com.fallbracelet.relay.RelayDiscovery
 import com.fallbracelet.relay.LinkedCaregiver
 import kotlinx.coroutines.flow.combine
 import com.fallbracelet.manager
@@ -97,7 +98,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // --- Relay, wearer side --------------------------------------------------------------
 
-    fun setRelayUrl(url: String) = viewModelScope.launch { m.settings.setRelayUrl(url); m.syncNow() }
+    fun setRelayUrl(url: String) = viewModelScope.launch {
+        m.settings.setRelay(url, RelayDiscovery.check(url.trim())?.relayId)
+        m.syncNow()
+    }
+
+    private val _finding = MutableStateFlow(false)
+    val finding: StateFlow<Boolean> = _finding.asStateFlow()
+
+    /** Scans the WiFi for the Pi and switches to it. */
+    fun findRelay() = viewModelScope.launch {
+        _finding.value = true
+        val found = m.finder.findNow()
+        _finding.value = false
+        _relayMessage.value = if (found == null) "No relay found on this WiFi. Is the Pi on the same network?" else null
+        if (found != null) m.syncNow()
+    }
 
     private val _invite = MutableStateFlow<Invite?>(null)
     val invite: StateFlow<Invite?> = _invite.asStateFlow()

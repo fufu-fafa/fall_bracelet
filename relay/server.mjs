@@ -49,8 +49,12 @@ db.exec(`
     cancelled_24h INTEGER, message TEXT NOT NULL, acked_by TEXT, acked_at INTEGER,
     escalations INTEGER NOT NULL DEFAULT 0,
     UNIQUE (wearer_id, device_address, seq));
+  CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   PRAGMA foreign_keys = ON;
 `);
+// Identifies this relay across address changes (e.g. a new hotspot), so phones keep their links.
+db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('relay_id', ?)").run(crypto.randomBytes(8).toString('hex'));
+const RELAY_ID = db.prepare("SELECT value FROM meta WHERE key = 'relay_id'").get().value;
 
 const now = () => Date.now();
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
@@ -166,7 +170,8 @@ function newInviteCode(wearerId, expiresAt) {
 }
 
 const routes = {
-  'GET /v1/health': () => ({ ok: true, time: now() }),
+  /** Also how phones find the relay: they scan their WiFi for this reply. */
+  'GET /v1/health': () => ({ ok: true, service: 'fallbracelet-relay', relayId: RELAY_ID, time: now() }),
 
   /** The wearer's phone registers once and keeps the token. */
   'POST /v1/wearers': async (req) => {
