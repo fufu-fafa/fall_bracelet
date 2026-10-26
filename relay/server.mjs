@@ -12,6 +12,9 @@ import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
 const PORT = Number(process.env.PORT ?? 8787);
+// Home-network only for now: requests from public addresses are refused. LAN_ONLY=0 lifts it
+// once the relay sits behind HTTPS (e.g. a Cloudflare Tunnel).
+const LAN_ONLY = process.env.LAN_ONLY !== '0';
 const DB_PATH = process.env.DB_PATH ?? new URL('./relay.db', import.meta.url).pathname;
 const OFFLINE_AFTER_MS = 15 * 60_000;   // PRD: caregivers told the wearer is offline after 15 min
 const ESCALATE_AFTER_MS = 2 * 60_000;   // PRD: re-push an unacknowledged FALL/SOS after 2 min
@@ -299,7 +302,21 @@ function match(method, path) {
   return [null, {}];
 }
 
+/** Loopback, link-local and private (RFC 1918 / ULA) addresses: the same network as the Pi. */
+function isLocal(addr = '') {
+  const a = addr.replace(/^::ffff:/, '');
+  if (/^(127\.|10\.|192\.168\.|169\.254\.)/.test(a)) return true;
+  const m = /^172\.(\d+)\./.exec(a);
+  if (m && Number(m[1]) >= 16 && Number(m[1]) <= 31) return true;
+  return a === '::1' || /^f[cd]/i.test(a) || /^fe[89ab]/i.test(a);
+}
+
 const server = http.createServer(async (req, res) => {
+  if (LAN_ONLY && !isLocal(req.socket.remoteAddress)) {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'this relay only accepts phones on the home network' }));
+    return;
+  }
   const path = new URL(req.url, 'http://x').pathname;
   const [handler, params] = match(req.method, path);
   try {
@@ -333,4 +350,4 @@ setInterval(() => {
   }
 }, 30_000).unref();
 
-server.listen(PORT, () => console.log(`relay listening on :${PORT}, db ${DB_PATH}`));
+server.listen(PORT, () => console.log(`relay listening on :${PORT}, db ${DB_PATH}${LAN_ONLY ? ', home network only' : ''}`));

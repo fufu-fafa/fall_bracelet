@@ -6,7 +6,7 @@ a FALL or SOS arrives. Node 22 and its built-in SQLite, no packages.
 
 | | |
 |---|---|
-| `server.mjs` | The relay. `PORT` (default 8787) and `DB_PATH` env vars |
+| `server.mjs` | The relay. `PORT` (default 8787), `DB_PATH` and `LAN_ONLY` (default on) env vars |
 | `test.mjs` | End-to-end test against a throwaway database |
 | `fall-bracelet-relay.service` | systemd unit for the Pi |
 
@@ -18,6 +18,9 @@ node --disable-warning=ExperimentalWarning ~/fall-bracelet-relay/test.mjs
 sudo cp fall-bracelet-relay.service /etc/systemd/system/
 sudo systemctl enable --now fall-bracelet-relay
 ```
+
+For now the relay only answers phones on the home network: requests from public addresses get
+`403`. Set `LAN_ONLY=0` once it sits behind HTTPS.
 
 Debug builds of the app point at `http://192.168.0.104:8787` (`app/src/debug/res/values/relay.xml`)
 and allow plain HTTP. Anything outside the home network needs HTTPS, e.g. a Cloudflare Tunnel.
