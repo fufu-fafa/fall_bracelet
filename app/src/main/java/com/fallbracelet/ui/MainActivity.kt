@@ -31,7 +31,6 @@ class MainActivity : ComponentActivity() {
             FallBraceletTheme {
                 App(
                     vm,
-                    requestSms = { permissions.launch(arrayOf(Manifest.permission.SEND_SMS)) },
                     enableBluetooth = {
                         runCatching { enableBluetooth.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }
                     },

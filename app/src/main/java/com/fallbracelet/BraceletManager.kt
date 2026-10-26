@@ -6,16 +6,21 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import com.fallbracelet.alert.AlertDispatcher
+import com.fallbracelet.alert.AlertRules
 import com.fallbracelet.ble.BraceletConnection
 import com.fallbracelet.ble.BraceletEvent
 import com.fallbracelet.ble.BraceletState
 import com.fallbracelet.ble.EventType
 import com.fallbracelet.ble.LinkState
 import com.fallbracelet.data.AppDatabase
+import com.fallbracelet.data.AppMode
 import com.fallbracelet.data.AppSettings
 import com.fallbracelet.data.EventEntity
+import com.fallbracelet.data.EventRelay
+import com.fallbracelet.data.NoRelay
 import com.fallbracelet.data.Recorder
 import com.fallbracelet.data.SettingsRepository
+import com.fallbracelet.data.Uploader
 import com.fallbracelet.service.BraceletService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -41,10 +46,14 @@ class BraceletManager(
     private val db: AppDatabase,
     val alerts: AlertDispatcher,
     private val scope: CoroutineScope,
+    /** Firebase once it is set up; until then events wait in the local upload queue. */
+    val relay: EventRelay = NoRelay,
 ) {
     val connection = BraceletConnection(context, scope)
     val recorder = Recorder(context)
     val events = db.events().recent()
+    val lastCheckin = db.events().lastCheckin()
+    private val uploader = Uploader(db.events(), relay)
     val appSettings: StateFlow<AppSettings> = settings.settings.stateIn(scope, SharingStarted.Eagerly, AppSettings())
 
     private val _recording = MutableStateFlow<File?>(null)
@@ -52,7 +61,9 @@ class BraceletManager(
 
     fun start() {
         scope.launch {
-            settings.settings.map { it.deviceAddress }.distinctUntilChanged().collect { address ->
+            // Only the wearer's phone talks to the bracelet; a caregiver phone never connects.
+            settings.settings.map { s -> s.deviceAddress.takeIf { s.mode == AppMode.WEARER } }
+                .distinctUntilChanged().collect { address ->
                 if (address == null) {
                     connection.disconnect()
                     BraceletService.stop(context)
@@ -71,6 +82,12 @@ class BraceletManager(
         }
         scope.launch { connection.status.filterNotNull().collect { lastKnownState = it.state } }
         scope.launch { watchOffline() }
+        scope.launch {
+            while (true) {
+                runCatching { uploader.flush() }
+                delay(60_000)
+            }
+        }
     }
 
     /** Survives disconnects: a bracelet that went Idle or Off on purpose isn't "lost". */
@@ -78,6 +95,7 @@ class BraceletManager(
 
     /** Called after the user grants Bluetooth permission. */
     fun retryConnect() {
+        if (appSettings.value.mode != AppMode.WEARER) return
         val address = appSettings.value.deviceAddress ?: return
         if (!canConnect()) return
         connection.connect(address)
@@ -88,6 +106,11 @@ class BraceletManager(
         ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
     suspend fun pair(address: String, name: String) = settings.setDevice(address, name)
+
+    suspend fun setMode(mode: AppMode) {
+        if (mode == AppMode.CAREGIVER) forget()
+        settings.setMode(mode)
+    }
 
     suspend fun forget() {
         stopRecording()
@@ -105,7 +128,10 @@ class BraceletManager(
 
     suspend fun clearHistory() = db.events().clear()
 
-    /** Store, alert, then acknowledge. The bracelet keeps the event in flash until the ACK. */
+    /**
+     * Store, alert, then acknowledge, then upload. The bracelet keeps the event in flash until
+     * the ACK; after that the local upload queue keeps it until the relay has it.
+     */
     private suspend fun handle(e: BraceletEvent) {
         val s = settings.settings.first()
         val address = s.deviceAddress ?: return
@@ -120,15 +146,11 @@ class BraceletManager(
                 alarms24h = e.alarms24h, cancelled24h = e.cancelled24h, message = text,
             )
         )
-        if (id != -1L) { // -1: a resend we already handled
-            if (e.type != EventType.CHECKIN && e.type != EventType.ON) {
-                alerts.notify(e.type, text, NOTIFY_BASE + (e.seq % 10_000).toInt())
-            }
-            if (s.smsEnabled && alerts.shouldText(e.type, s.smsCheckins)) {
-                db.events().setSmsSent(id, alerts.sendSms(s.caregivers, text))
-            }
+        if (id != -1L && AlertRules.notifiesThisPhone(e.type)) { // -1: a resend we already handled
+            alerts.notify(e.type, text, NOTIFY_BASE + (e.seq % 10_000).toInt())
         }
         connection.ack(e.seq)
+        runCatching { uploader.flush() }
     }
 
     private suspend fun watchOffline() {
@@ -146,9 +168,8 @@ class BraceletManager(
                     settings.setLastSeen(now)
                     lastPersist = now
                 }
-            } else if (s.deviceAddress != null && s.offlineAlertMin > 0 && !warned &&
-                lastKnownState != BraceletState.IDLE && lastKnownState != BraceletState.OFF &&
-                now - lastSeen > s.offlineAlertMin * 60_000L
+            } else if (!warned &&
+                AlertRules.shouldWarnOffline(now, lastSeen, s.offlineAlertMin, lastKnownState, s.deviceAddress != null)
             ) {
                 alerts.notifyOffline(((now - lastSeen) / 60_000).toInt())
                 warned = true

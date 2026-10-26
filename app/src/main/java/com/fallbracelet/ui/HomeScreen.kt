@@ -39,17 +39,20 @@ fun HomeScreen(vm: AppViewModel) {
     val link by vm.link.collectAsState()
     val status by vm.status.collectAsState()
     val events by vm.events.collectAsState()
+    val lastCheckin by vm.lastCheckin.collectAsState()
 
     Column(Modifier.verticalScroll(rememberScrollState())) {
         val who = settings.wearerName.ifBlank { null }?.let { "$it's bracelet" } ?: (settings.deviceName ?: "Bracelet")
         ScreenTitle(who)
         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SetupWarnings(vm.relayConfigured)
             LinkCard(link, settings.deviceName, settings.lastSeenAt)
             status?.let { s ->
                 if (s.state == BraceletState.COUNTDOWN) CountdownCard(s) { vm.command(Command.CANCEL) }
                 StateCard(s)
                 BatteryCard(s)
             }
+            CheckinCard(lastCheckin)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(
                     onClick = { vm.command(Command.FIND) },
@@ -162,6 +165,25 @@ private fun BatteryCard(s: BraceletStatus) {
         }
         Spacer(Modifier.height(6.dp))
         Text("Voltage estimate; reads high while charging.", color = AppTheme.extra.muted, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun CheckinCard(last: EventEntity?) {
+    Card {
+        SectionLabel("Daily check-in")
+        if (last == null) {
+            Text("No check-in received yet.", color = AppTheme.extra.muted)
+        } else {
+            val at = java.text.SimpleDateFormat("d MMM HH:mm", java.util.Locale.getDefault()).format(java.util.Date(last.occurredAt))
+            Text("Last check-in $at", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "${relativeTime(last.occurredAt)} · battery ${last.batteryPct}% · " +
+                    "${last.alarms24h} alarms, ${last.cancelled24h} cancelled in 24 h",
+                color = AppTheme.extra.muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
     }
 }
 

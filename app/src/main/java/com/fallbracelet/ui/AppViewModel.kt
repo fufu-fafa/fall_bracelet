@@ -7,6 +7,7 @@ import com.fallbracelet.ble.BleScanner
 import com.fallbracelet.ble.BraceletConfig
 import com.fallbracelet.ble.Command
 import com.fallbracelet.ble.FoundDevice
+import com.fallbracelet.data.AppMode
 import com.fallbracelet.manager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +29,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val config = m.connection.config
     val events = m.events.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val recording = m.recording
+    val lastCheckin = m.lastCheckin.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val relayConfigured = m.relay.configured
 
     // --- Scanning ------------------------------------------------------------------------
 
@@ -84,11 +87,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // --- Phone settings ------------------------------------------------------------------
 
-    fun setCaregivers(text: String) = viewModelScope.launch {
-        m.settings.setCaregivers(text.split('\n', ',').map { it.trim() }.filter { it.isNotEmpty() })
-    }
-    fun setSms(on: Boolean) = viewModelScope.launch { m.settings.setSmsEnabled(on) }
-    fun setSmsCheckins(on: Boolean) = viewModelScope.launch { m.settings.setSmsCheckins(on) }
+    fun setMode(mode: AppMode) = viewModelScope.launch { m.setMode(mode) }
     fun setOfflineAlert(min: Int) = viewModelScope.launch { m.settings.setOfflineAlertMin(min) }
     fun clearHistory() = viewModelScope.launch { m.clearHistory() }
 

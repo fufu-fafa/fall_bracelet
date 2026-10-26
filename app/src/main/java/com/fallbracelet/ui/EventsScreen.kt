@@ -63,12 +63,6 @@ fun EventLine(e: EventEntity, full: Boolean = false) {
         Spacer(Modifier.size(4.dp))
         Text(e.message, style = MaterialTheme.typography.bodyMedium)
         if (full) {
-            val sms = when (e.smsSent) {
-                true -> "Texted caregivers"
-                false -> "SMS failed — check the numbers and SMS permission"
-                null -> null
-            }
-            if (sms != null) Text(sms, color = if (e.smsSent == true) Tokens.Correct else Tokens.Wrong, style = MaterialTheme.typography.bodySmall)
             if (e.receivedAt - e.occurredAt > 60_000) {
                 Text("Received ${relativeTime(e.receivedAt)} (delivered late)", color = AppTheme.extra.muted, style = MaterialTheme.typography.bodySmall)
             }

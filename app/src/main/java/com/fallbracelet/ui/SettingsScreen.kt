@@ -20,8 +20,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,7 +29,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,12 +37,13 @@ import androidx.compose.ui.unit.dp
 import com.fallbracelet.ble.BraceletConfig
 import com.fallbracelet.ble.Command
 import com.fallbracelet.ble.LinkState
+import com.fallbracelet.data.AppMode
 import com.fallbracelet.ui.theme.AppTheme
 import com.fallbracelet.ui.theme.Mono
 import com.fallbracelet.ui.theme.Tokens
 
 @Composable
-fun SettingsScreen(vm: AppViewModel, requestSms: () -> Unit) {
+fun SettingsScreen(vm: AppViewModel) {
     val settings by vm.settings.collectAsState()
     val link by vm.link.collectAsState()
     val config by vm.config.collectAsState()
@@ -59,35 +57,18 @@ fun SettingsScreen(vm: AppViewModel, requestSms: () -> Unit) {
 
             Card {
                 SectionLabel("Caregivers")
-                var numbers by rememberSaveable(settings.caregivers) { mutableStateOf(settings.caregivers.joinToString("\n")) }
-                OutlinedTextField(
-                    value = numbers,
-                    onValueChange = { numbers = it },
-                    label = { Text("Phone numbers, one per line") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    minLines = 2,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = { vm.setCaregivers(numbers) }) { Text("Save numbers") }
-                Spacer(Modifier.height(12.dp))
-                ToggleRow(
-                    "Text caregivers",
-                    "FALL, SOS, low battery, switched off and test alerts go out by SMS from this phone.",
-                    settings.smsEnabled,
-                ) { on -> if (on) requestSms(); vm.setSms(on) }
-                ToggleRow(
-                    "Also text daily check-ins",
-                    "If a check-in stops arriving, the bracelet is off, flat or out of range.",
-                    settings.smsCheckins,
-                    enabled = settings.smsEnabled,
-                    onChange = vm::setSmsCheckins,
+                Text("No caregivers linked yet.")
+                Text(
+                    "Caregivers get alarms in the FallBracelet app on their own phone, through the relay. " +
+                        "Inviting them by QR code or invite code arrives once the relay is set up.",
+                    color = AppTheme.extra.muted,
+                    style = MaterialTheme.typography.bodySmall,
                 )
             }
 
             Card {
                 SectionLabel("Out-of-range warning")
-                Text("Notify this phone when the bracelet hasn't connected for:", color = AppTheme.extra.muted)
+                Text("Warn when the bracelet hasn't connected for:", color = AppTheme.extra.muted)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(0 to "Never", 15 to "15 min", 30 to "30 min", 60 to "1 h", 120 to "2 h").forEach { (min, text) ->
@@ -203,12 +184,20 @@ private fun DeviceActions(vm: AppViewModel, connected: Boolean, name: String?, a
         OutlinedButton(onClick = { confirm = "forget" }, modifier = Modifier.fillMaxWidth()) {
             Text("Forget this bracelet", color = Tokens.Wrong)
         }
+        OutlinedButton(onClick = { confirm = "caregiver" }, modifier = Modifier.fillMaxWidth()) {
+            Text("Use this phone as a caregiver instead")
+        }
     }
 
     val (title, body, action) = when (confirm) {
         "off" -> Triple("Switch off?", "The bracelet stops monitoring and tells the caregivers it's off.", { vm.command(Command.POWER_OFF); Unit })
         "history" -> Triple("Clear history?", "Deletes the event list on this phone only.", { vm.clearHistory(); Unit })
         "forget" -> Triple("Forget bracelet?", "This phone stops receiving its alerts until you pair again.", { vm.forget(); Unit })
+        "caregiver" -> Triple(
+            "Switch to caregiver mode?",
+            "This phone forgets the bracelet and stops receiving its events. Use it on a caregiver's phone, not the wearer's.",
+            { vm.setMode(AppMode.CAREGIVER); Unit },
+        )
         else -> return
     }
     AlertDialog(
@@ -219,25 +208,4 @@ private fun DeviceActions(vm: AppViewModel, connected: Boolean, name: String?, a
         confirmButton = { TextButton(onClick = { action(); confirm = null }) { Text("Confirm", color = Tokens.Wrong) } },
         dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
     )
-}
-
-@Composable
-private fun ToggleRow(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    enabled: Boolean = true,
-    onChange: (Boolean) -> Unit,
-) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 6.dp)) {
-        Column(Modifier.weight(1f)) {
-            Text(title, color = if (enabled) Tokens.Text else Tokens.Muted)
-            Text(subtitle, color = AppTheme.extra.muted, style = MaterialTheme.typography.bodySmall)
-        }
-        Spacer(Modifier.width(12.dp))
-        Switch(
-            checked = checked, onCheckedChange = onChange, enabled = enabled,
-            colors = SwitchDefaults.colors(checkedTrackColor = Tokens.Accent),
-        )
-    }
 }

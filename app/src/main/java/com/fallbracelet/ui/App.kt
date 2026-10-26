@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.fallbracelet.ble.FoundDevice
+import com.fallbracelet.data.AppMode
 import com.fallbracelet.ui.theme.AppTheme
 import com.fallbracelet.ui.theme.Mono
 import com.fallbracelet.ui.theme.Tokens
@@ -52,8 +53,13 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 }
 
 @Composable
-fun App(vm: AppViewModel, requestSms: () -> Unit, enableBluetooth: () -> Unit) {
+fun App(vm: AppViewModel, enableBluetooth: () -> Unit) {
     val settings by vm.settings.collectAsState()
+    when (settings.mode) {
+        null -> { ModeScreen(vm::setMode); return }
+        AppMode.CAREGIVER -> { CaregiverScreen { vm.setMode(AppMode.WEARER) }; return }
+        AppMode.WEARER -> Unit
+    }
     if (settings.deviceAddress == null) {
         PairScreen(vm, enableBluetooth)
         return
@@ -86,7 +92,7 @@ fun App(vm: AppViewModel, requestSms: () -> Unit, enableBluetooth: () -> Unit) {
                 Tab.Home -> HomeScreen(vm)
                 Tab.Events -> EventsScreen(vm)
                 Tab.Live -> LiveScreen(vm)
-                Tab.Settings -> SettingsScreen(vm, requestSms)
+                Tab.Settings -> SettingsScreen(vm)
             }
         }
     }

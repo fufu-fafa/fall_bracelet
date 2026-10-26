@@ -10,16 +10,18 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
+/** Which side of the product this phone is. */
+enum class AppMode { WEARER, CAREGIVER }
+
 /** Phone-side settings. The bracelet's own settings (name, countdown, check-in) live on the bracelet. */
 data class AppSettings(
+    /** Null until the first-launch choice is made. */
+    val mode: AppMode? = null,
     val deviceAddress: String? = null,
     val deviceName: String? = null,
     /** Cached so alerts can name the wearer while the bracelet is out of range. */
     val wearerName: String = "",
-    val caregivers: List<String> = emptyList(),
-    val smsEnabled: Boolean = false,
-    val smsCheckins: Boolean = false,
-    /** Warn on this phone when the bracelet has been out of range this long; 0 = never. */
+    /** Warn when the bracelet has been out of range this long; 0 = never. */
     val offlineAlertMin: Int = 30,
     val lastSeenAt: Long = 0,
 )
@@ -28,28 +30,34 @@ private val Context.dataStore by preferencesDataStore("settings")
 
 class SettingsRepository(private val context: Context) {
     private object Keys {
+        val mode = stringPreferencesKey("app_mode")
         val address = stringPreferencesKey("device_address")
         val name = stringPreferencesKey("device_name")
         val wearer = stringPreferencesKey("wearer_name")
-        val caregivers = stringPreferencesKey("caregivers")
-        val sms = booleanPreferencesKey("sms_enabled")
-        val smsCheckins = booleanPreferencesKey("sms_checkins")
         val offline = intPreferencesKey("offline_alert_min")
         val lastSeen = longPreferencesKey("last_seen_at")
+
+        // Left behind by the SMS build; removed on the next write.
+        val oldCaregivers = stringPreferencesKey("caregivers")
+        val oldSms = booleanPreferencesKey("sms_enabled")
+        val oldSmsCheckins = booleanPreferencesKey("sms_checkins")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
+        val address = p[Keys.address]
         AppSettings(
-            deviceAddress = p[Keys.address],
+            // A phone paired before the mode choice existed is the wearer's phone.
+            mode = p[Keys.mode]?.let { runCatching { AppMode.valueOf(it) }.getOrNull() }
+                ?: if (address != null) AppMode.WEARER else null,
+            deviceAddress = address,
             deviceName = p[Keys.name],
             wearerName = p[Keys.wearer] ?: "",
-            caregivers = p[Keys.caregivers].orEmpty().split('\n').map { it.trim() }.filter { it.isNotEmpty() },
-            smsEnabled = p[Keys.sms] ?: false,
-            smsCheckins = p[Keys.smsCheckins] ?: false,
             offlineAlertMin = p[Keys.offline] ?: 30,
             lastSeenAt = p[Keys.lastSeen] ?: 0,
         )
     }
+
+    suspend fun setMode(mode: AppMode) = edit { it[Keys.mode] = mode.name }
 
     suspend fun setDevice(address: String?, name: String?) = edit {
         if (address == null) { it.remove(Keys.address); it.remove(Keys.name) }
@@ -57,13 +65,15 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun setWearerName(name: String) = edit { it[Keys.wearer] = name }
-    suspend fun setCaregivers(numbers: List<String>) = edit { it[Keys.caregivers] = numbers.joinToString("\n") }
-    suspend fun setSmsEnabled(on: Boolean) = edit { it[Keys.sms] = on }
-    suspend fun setSmsCheckins(on: Boolean) = edit { it[Keys.smsCheckins] = on }
     suspend fun setOfflineAlertMin(min: Int) = edit { it[Keys.offline] = min }
     suspend fun setLastSeen(at: Long) = edit { it[Keys.lastSeen] = at }
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
-        context.dataStore.edit(block)
+        context.dataStore.edit {
+            it.remove(Keys.oldCaregivers)
+            it.remove(Keys.oldSms)
+            it.remove(Keys.oldSmsCheckins)
+            block(it)
+        }
     }
 }
