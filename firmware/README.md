@@ -60,4 +60,15 @@ arduino-cli upload --fqbn esp32:esp32:esp32 -p /dev/ttyUSB0 ble_msg_test
 python3 ble_msg_test/bt_cmd.py fall          # or: picocom -b 115200 --omap crlf /dev/ttyUSB0
 ```
 
+From the phone: in **Serial Bluetooth Terminal**, open Devices → Bluetooth LE, scan, and tap the
+board (Android may show an older cached name for its address). Type the same commands. The
+board also runs a Nordic UART service for this, next to the bracelet service, so the
+FallBracelet app stays connected and acknowledges the events while you type. Everything the
+board prints goes to both USB serial and the terminal. It never answers unknown input from the
+terminal, so a terminal that echoes can't start a loop.
+
+A phone that bonded before the UART service existed keeps an old copy of the service list.
+The board sends Service Changed once per `GATT_LAYOUT` (stored in NVS) to refresh it. After
+that one refresh, restart the FallBracelet app once so it picks up the new handles.
+
 `ble_protocol.h` in that folder is a copy; keep it in sync with `fall_bracelet/`.
