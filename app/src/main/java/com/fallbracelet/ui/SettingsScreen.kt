@@ -2,6 +2,7 @@ package com.fallbracelet.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -61,7 +62,8 @@ fun SettingsScreen(vm: AppViewModel) {
                 SectionLabel("Out-of-range warning")
                 Text("Warn when the bracelet hasn't connected for:", color = AppTheme.extra.muted)
                 Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Wraps onto a second line on narrow screens instead of cutting the last options off.
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(0 to "Never", 15 to "15 min", 30 to "30 min", 60 to "1 h", 120 to "2 h").forEach { (min, text) ->
                         FilterChip(
                             selected = settings.offlineAlertMin == min,
@@ -252,7 +254,7 @@ private fun CaregiversCard(vm: AppViewModel) {
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         )
         val finding by vm.finding.collectAsState()
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = vm::findRelay, enabled = !finding) { Text(if (finding) "Searching…" else "Find relay on this WiFi") }
             if (url.trim() != settings.relayUrl) {
                 OutlinedButton(onClick = { vm.setRelayUrl(url) }) { Text("Save") }
