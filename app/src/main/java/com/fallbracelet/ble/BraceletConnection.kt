@@ -1,6 +1,7 @@
 package com.fallbracelet.ble
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
@@ -9,7 +10,11 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
@@ -35,7 +40,8 @@ enum class LinkState { DISCONNECTED, CONNECTING, CONNECTED }
  * so every read/write goes through [op], which waits for the matching callback.
  *
  * Once [connect] is called the connection is kept alive: after a drop it reconnects with
- * autoConnect, which waits in the background until the bracelet is back in range.
+ * autoConnect, which waits in the background until the bracelet is back in range. Turning
+ * Bluetooth off kills that pending connection, so it reconnects again when Bluetooth comes back.
  */
 @SuppressLint("MissingPermission") // Callers check BLUETOOTH_CONNECT before connecting.
 class BraceletConnection(private val context: Context, private val scope: CoroutineScope) {
@@ -62,6 +68,33 @@ class BraceletConnection(private val context: Context, private val scope: Corout
     private var setupJob: Job? = null
 
     private val opLock = Mutex()
+
+    /** Bluetooth off drops the link and any pending autoConnect; on again starts a fresh one. */
+    private val adapterState = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            when (i.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF -> {
+                    Log.i(TAG, "Bluetooth off")
+                    setupJob?.cancel()
+                    pending?.complete(null)
+                    gatt?.close()
+                    gatt = null
+                    _status.value = null
+                    if (address != null) _link.value = LinkState.CONNECTING
+                }
+                BluetoothAdapter.STATE_ON -> if (address != null && gatt == null) {
+                    Log.i(TAG, "Bluetooth on, reconnecting")
+                    open(autoConnect = false)
+                }
+            }
+        }
+    }
+
+    init {
+        ContextCompat.registerReceiver(
+            context, adapterState, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+    }
     @Volatile private var pending: CompletableDeferred<ByteArray?>? = null
 
     fun connect(address: String) {
@@ -84,8 +117,10 @@ class BraceletConnection(private val context: Context, private val scope: Corout
 
     private fun open(autoConnect: Boolean) {
         val addr = address ?: return
-        val device: BluetoothDevice = adapter?.getRemoteDevice(addr) ?: return
         _link.value = LinkState.CONNECTING
+        // With Bluetooth off connectGatt fails quietly; the adapter receiver opens again on STATE_ON.
+        if (adapter?.isEnabled != true) return
+        val device: BluetoothDevice = adapter.getRemoteDevice(addr)
         gatt = device.connectGatt(context, autoConnect, callback, BluetoothDevice.TRANSPORT_LE)
     }
 
