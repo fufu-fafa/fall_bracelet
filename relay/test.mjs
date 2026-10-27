@@ -48,7 +48,7 @@ async function listen(token, lastEventId) {
   return { got, close: () => ctrl.abort() };
 }
 const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
-const fall = (seq) => ({ deviceAddress: 'F4:65:0B:EA:D1:BE', seq, type: 'FALL', batteryPct: 80, occurredAt: Date.now(), impactG: 3.9, message: 'FALL detected — test' });
+const fall = (seq) => ({ deviceAddress: 'AA:BB:CC:00:11:22', seq, type: 'FALL', batteryPct: 80, occurredAt: Date.now(), impactG: 3.9, message: 'FALL detected — test' });
 
 try {
   const health = (await api('GET', '/v1/health')).json;

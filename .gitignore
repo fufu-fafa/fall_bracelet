@@ -14,3 +14,10 @@ keystore.properties
 
 # Recordings pulled from the phone
 *.csv
+
+# Relay database on the Pi, and anything holding keys
+relay.db*
+*.db
+google-services.json
+.env
+*.env

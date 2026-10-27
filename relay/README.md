@@ -15,8 +15,8 @@ a FALL or SOS arrives. Node 22 and its built-in SQLite, no packages.
 ```bash
 mkdir -p ~/fall-bracelet-relay && cp server.mjs test.mjs ~/fall-bracelet-relay/
 node --disable-warning=ExperimentalWarning ~/fall-bracelet-relay/test.mjs
-sudo cp fall-bracelet-relay.service /etc/systemd/system/
-sudo systemctl enable --now fall-bracelet-relay
+sed "s/YOUR_PI_USER/$USER/g" fall-bracelet-relay.service | sudo tee /etc/systemd/system/fall-bracelet-relay.service >/dev/null
+sudo systemctl daemon-reload && sudo systemctl enable --now fall-bracelet-relay
 ```
 
 For now the relay only answers phones on the home network: requests from public addresses get

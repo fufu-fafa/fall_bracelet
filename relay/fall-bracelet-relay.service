@@ -4,10 +4,11 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-User=justsybau
-WorkingDirectory=/home/justsybau/fall-bracelet-relay
+# Replace YOUR_PI_USER with the Pi account the relay runs as.
+User=YOUR_PI_USER
+WorkingDirectory=/home/YOUR_PI_USER/fall-bracelet-relay
 Environment=PORT=8787
-Environment=DB_PATH=/home/justsybau/fall-bracelet-relay/relay.db
+Environment=DB_PATH=/home/YOUR_PI_USER/fall-bracelet-relay/relay.db
 ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server.mjs
 Restart=always
 RestartSec=3
