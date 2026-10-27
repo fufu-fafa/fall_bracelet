@@ -10,12 +10,14 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
 
 const PORT = Number(process.env.PORT ?? 8787);
 // Home-network only for now: requests from public addresses are refused. LAN_ONLY=0 lifts it
 // once the relay sits behind HTTPS (e.g. a Cloudflare Tunnel).
 const LAN_ONLY = process.env.LAN_ONLY !== '0';
 const DB_PATH = process.env.DB_PATH ?? new URL('./relay.db', import.meta.url).pathname;
+const WEB_PAGE = new URL('./web/index.html', import.meta.url);
 const OFFLINE_AFTER_MS = 15 * 60_000;   // PRD: caregivers told the wearer is offline after 15 min
 const ESCALATE_AFTER_MS = 2 * 60_000;   // PRD: re-push an unacknowledged FALL/SOS after 2 min
 const INVITE_TTL_MS = 15 * 60_000;
@@ -169,7 +171,17 @@ function newInviteCode(wearerId, expiresAt) {
   }
 }
 
+/** Caregiver mode in a browser (web/index.html), read per request so it can be updated in place. */
+function caregiverPage(req, p, res) {
+  const html = readFileSync(WEB_PAGE);
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+  res.end(html);
+}
+
 const routes = {
+  'GET /': caregiverPage,
+  'GET /caregiver': caregiverPage,
+
   /** Also how phones find the relay: they scan their WiFi for this reply. */
   'GET /v1/health': () => ({ ok: true, service: 'fallbracelet-relay', relayId: RELAY_ID, time: now() }),
 

@@ -7,13 +7,14 @@ a FALL or SOS arrives. Node 22 and its built-in SQLite, no packages.
 | | |
 |---|---|
 | `server.mjs` | The relay. `PORT` (default 8787), `DB_PATH` and `LAN_ONLY` (default on) env vars |
+| `web/index.html` | Caregiver mode in a browser, served at `/` (see below) |
 | `test.mjs` | End-to-end test against a throwaway database |
 | `fall-bracelet-relay.service` | systemd unit for the Pi |
 
 ## Run on the Pi
 
 ```bash
-mkdir -p ~/fall-bracelet-relay && cp server.mjs test.mjs ~/fall-bracelet-relay/
+mkdir -p ~/fall-bracelet-relay/web && cp server.mjs test.mjs ~/fall-bracelet-relay/ && cp web/index.html ~/fall-bracelet-relay/web/
 node --disable-warning=ExperimentalWarning ~/fall-bracelet-relay/test.mjs
 sed "s/YOUR_PI_USER/$USER/g" fall-bracelet-relay.service | sudo tee /etc/systemd/system/fall-bracelet-relay.service >/dev/null
 sudo systemctl daemon-reload && sudo systemctl enable --now fall-bracelet-relay
@@ -29,6 +30,19 @@ links. Settings and the caregiver link screen also have "Find relay on this WiFi
 
 Debug builds of the app point at `http://192.168.0.104:8787` (`app/src/debug/res/values/relay.xml`)
 and allow plain HTTP. Anything outside the home network needs HTTPS, e.g. a Cloudflare Tunnel.
+
+## Caregiver mode in a browser
+
+Open `http://<pi address>:8787/` on any phone or laptop on the same WiFi. It does what the app's
+Caregiver mode does: link with the wearer's 6-digit invite code, a live stream with a full-screen
+alarm and Acknowledge, and a dashboard per wearer (online, bracelet, state, battery, last check-in,
+history). The token stays in that browser's storage, so a reload keeps the link.
+
+A browser can't wake a locked phone the way the app's full-screen alarm does. The page rings
+(after one tap, which browsers require before playing sound), vibrates on Android, flashes and
+keeps the screen on only while it is open in the foreground. Notifications and the screen wake
+lock need HTTPS, so on plain `http://` on the LAN they're off; the page says what's missing.
+The page is read on every request, so copying a new `web/index.html` needs no restart.
 
 ## API
 

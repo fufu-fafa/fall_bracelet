@@ -51,6 +51,11 @@ const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const fall = (seq) => ({ deviceAddress: 'AA:BB:CC:00:11:22', seq, type: 'FALL', batteryPct: 80, occurredAt: Date.now(), impactG: 3.9, message: 'FALL detected — test' });
 
 try {
+  const page = await fetch(base + '/');
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get('content-type'), /text\/html/);
+  assert.match(await page.text(), /Caregiver/, 'web caregiver page served');
+
   const health = (await api('GET', '/v1/health')).json;
   assert.equal(health.service, 'fallbracelet-relay');
   assert.match(health.relayId, /^[0-9a-f]{16}$/);

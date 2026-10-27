@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>FallBracelet Caregiver</title>
+<!-- Caregiver mode in a browser, served by the relay. Same API as the app: link with an invite
+     code, keep the live stream open, ring on FALL/SOS, Acknowledge. A browser can't wake a locked
+     phone, so the page has to stay open: it rings, vibrates and notifies while it is. -->
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --text: #e6edf3; --muted: #8d96a0; --border: #30363d;
+    --accent: #4f8cff; --ok: #3fb950; --ok-bg: #12261e; --bad: #f85149; --bad-bg: #2d1416;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body { font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: 0 16px 32px;
+         max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 28px; margin: 24px 0 2px; }
+  .sub { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+  .label { text-transform: uppercase; letter-spacing: .06em; font-size: 12px; color: var(--muted); margin: 0 0 6px; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .grow { flex: 1; min-width: 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; word-break: break-all; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; white-space: nowrap;
+          color: var(--muted); background: var(--border); }
+  .pill.ok { color: var(--ok); background: var(--ok-bg); }
+  .pill.bad { color: var(--bad); background: var(--bad-bg); }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+  input { width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+          border-radius: 10px; padding: 12px; }
+  input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  #code { font-size: 24px; letter-spacing: .3em; text-align: center; font-family: ui-monospace, Menlo, monospace; }
+  button { font: inherit; font-weight: 600; border-radius: 10px; padding: 12px 16px; cursor: pointer; width: 100%;
+           border: 1px solid var(--border); background: transparent; color: var(--text); margin-top: 8px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.inline { width: auto; padding: 6px 14px; margin-top: 6px; }
+  .msg { margin-top: 8px; font-size: 14px; }
+  .msg.bad { color: var(--bad); } .msg.ok { color: var(--ok); }
+  .wearer h2 { font-size: 22px; margin: 0; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+  .stat { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; }
+  .stat b { display: block; font-size: 18px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .battery { height: 6px; background: var(--border); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .battery i { display: block; height: 100%; background: var(--ok); }
+  .ev { padding: 10px 0; border-top: 1px solid var(--border); }
+  .ev:first-of-type { border-top: 0; }
+  .ev .seen { color: var(--ok); font-size: 13px; }
+  .banner { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
+  .banner button { border-color: var(--bad); color: var(--bad); }
+
+  /* Full-screen alarm, the browser stand-in for the app's AlarmActivity. */
+  #alarm { position: fixed; inset: 0; background: #b3121b; color: #fff; display: none; flex-direction: column;
+           justify-content: center; align-items: center; text-align: center; padding: 24px; z-index: 10;
+           animation: flash 1s steps(2) infinite; }
+  #alarm.on { display: flex; }
+  #alarm h2 { font-size: 44px; margin: 0; }
+  #alarm p { font-size: 20px; margin: 8px 0; max-width: 520px; }
+  #alarm button { background: #fff; color: #b3121b; border: 0; font-size: 22px; padding: 18px; max-width: 420px; margin-top: 24px; }
+  #alarm .more { color: #ffd7d9; font-size: 15px; }
+  @keyframes flash { 50% { background: #7a0c12; } }
+  @media (prefers-reduced-motion: reduce) { #alarm { animation: none; } }
+</style>
+</head>
+<body>
+<h1>Caregiver</h1>
+<p class="sub" id="who"></p>
+
+<div id="sound" class="card banner" hidden>
+  <div>Tap once so this page can ring when an alarm comes in. Keep the page open, with the screen on.</div>
+  <button id="soundBtn">Turn on alarm sound</button>
+</div>
+
+<div id="status" class="card" hidden>
+  <div class="row">
+    <div class="grow"><p class="label">Relay</p><div class="mono" id="relay"></div></div>
+    <span class="pill" id="live">Off</span>
+  </div>
+  <div class="msg bad" id="streamErr"></div>
+  <div class="muted small" id="caps"></div>
+</div>
+
+<div id="wearers"></div>
+
+<div id="link" class="card" hidden>
+  <p class="label">Link to a wearer</p>
+  <div class="muted">On the wearer's phone: Settings → Invite a caregiver. Type the 6-digit code here.</div>
+  <form id="linkForm" autocomplete="off">
+    <label for="code">Invite code</label>
+    <input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000">
+    <label for="name">Your name (shown as "Seen by …")</label>
+    <input id="name" maxlength="40">
+    <button class="primary" id="linkBtn" disabled>Link</button>
+    <button type="button" id="cancelLink" hidden>Cancel</button>
+  </form>
+  <div class="msg" id="linkMsg"></div>
+</div>
+
+<button id="another" hidden>Link another wearer</button>
+<button id="signout" hidden>Sign out of this browser</button>
+
+<div id="alarm" role="alertdialog" aria-live="assertive">
+  <h2 id="alarmTitle">FALL</h2>
+  <p id="alarmWho"></p>
+  <p id="alarmMsg"></p>
+  <p class="more" id="alarmMore"></p>
+  <p class="more" id="alarmMute" hidden>Sound is off: tap anywhere outside the button to turn it on.</p>
+  <button id="ackBtn">Acknowledge</button>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const store = {
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} },
+};
+const LABELS = { FALL: 'Fall', SOS: 'SOS', LOW_BATTERY: 'Low battery', OFF: 'Switched off', CHECKIN: 'Daily check-in',
+                 CANCELLED: 'Alarm cancelled', ON: 'Switched on', TEST: 'Test' };
+const ALARMS = new Set(['FALL', 'SOS']);
+const RING_WINDOW_MS = 30 * 60_000; // ring for unacknowledged alarms this recent, e.g. after reopening the page
+
+let token = store.get('cg.token');
+let me = store.get('cg.name') || '';
+let wearers = new Map();  // id -> wearer from /v1/dashboard, kept current by the stream
+let lastEventId = Number(store.get('cg.lastEventId')) || null;
+let ringing = [];         // unacknowledged alarm events, oldest first
+let streamCtrl = null;
+
+// --- API ---------------------------------------------------------------------------------------
+
+async function api(method, path, body, auth = token) {
+  const r = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: `Bearer ${auth}` } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(json.error || `HTTP ${r.status}`), { status: r.status });
+  return json;
+}
+
+async function loadDashboard() {
+  const d = await api('GET', '/v1/dashboard');
+  wearers = new Map(d.wearers.map((w) => [w.id, w]));
+  for (const w of d.wearers) for (const e of w.events) maybeRing({ ...e, wearerName: w.name });
+  render();
+}
+
+// --- Live stream: fetch instead of EventSource, which can't send the bearer token -----------------
+
+function setLive(state, err = '') {
+  const el = $('live');
+  el.textContent = { live: 'Live', connecting: 'Reconnecting…', off: 'Off' }[state];
+  el.className = 'pill ' + ({ live: 'ok', off: 'bad' }[state] || '');
+  $('streamErr').textContent = err;
+}
+
+async function stream() {
+  streamCtrl?.abort();
+  const ctrl = streamCtrl = new AbortController();
+  while (!ctrl.signal.aborted) {
+    setLive('connecting');
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      if (lastEventId) headers['Last-Event-ID'] = String(lastEventId);
+      const r = await fetch('/v1/stream', { headers, signal: ctrl.signal, cache: 'no-store' });
+      if (r.status === 401) { signOut('This browser was unlinked. Link again with a new code.'); return; }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setLive('live');
+      await loadDashboard();
+      const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buf = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += value.replace(/\r\n/g, '\n');
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, i); buf = buf.slice(i + 2);
+          const type = /^event: ?(.*)$/m.exec(block)?.[1];
+          const data = /^data: ?(.*)$/m.exec(block)?.[1];
+          const id = /^id: ?(.*)$/m.exec(block)?.[1];
+          if (id) { lastEventId = Number(id); store.set('cg.lastEventId', id); }
+          if (type && data) onMessage(type, JSON.parse(data));
+        }
+      }
+      throw new Error('connection closed');
+    } catch (err) {
+      if (ctrl.signal.aborted) return;
+      setLive('off', `Can't reach the relay (${err.message}). Retrying…`);
+      await new Promise((ok) => setTimeout(ok, 5000));
+    }
+  }
+}
+
+function onMessage(type, d) {
+  const w = wearers.get(d.wearerId);
+  switch (type) {
+    case 'event': {
+      if (!w) { loadDashboard().catch(() => {}); break; }
+      const i = w.events.findIndex((e) => e.id === d.id);
+      if (i >= 0) w.events[i] = { ...w.events[i], ...d }; else w.events.unshift(d);
+      w.events.sort((a, b) => b.occurredAt - a.occurredAt || b.id - a.id);
+      if (d.batteryPct != null) w.status = { ...(w.status || {}), batteryPct: d.batteryPct };
+      maybeRing({ ...d, wearerName: d.wearerName || w.name });
+      break;
+    }
+    case 'status': if (w) { w.status = d.status; w.lastHeartbeat = d.at; w.offline = false; } break;
+    case 'online': if (w) w.offline = false; break;
+    case 'offline':
+      if (w) { w.offline = true; notify(`${w.name}'s phone is offline`, 'No word from the wearer\'s phone for 15 minutes.', 'offline-' + w.id); }
+      break;
+    case 'ack':
+      if (w) { const e = w.events.find((x) => x.id === d.eventId); if (e) Object.assign(e, { ackedBy: d.by, ackedAt: d.at }); }
+      ringing = ringing.filter((e) => e.id !== d.eventId);
+      updateAlarm();
+      break;
+    case 'unlinked': wearers.delete(d.wearerId); ringing = ringing.filter((e) => e.wearerId !== d.wearerId); updateAlarm(); break;
+  }
+  render();
+}
+
+// --- Alarm: full-screen, siren, vibration and a notification while the page is open --------------
+
+function maybeRing(e) {
+  if (!ALARMS.has(e.type) || e.ackedAt || Date.now() - e.occurredAt > RING_WINDOW_MS) return;
+  const known = ringing.find((x) => x.id === e.id);
+  if (known) { if (e.escalated) Object.assign(known, e); return; }
+  ringing.push(e);
+  notify(`${LABELS[e.type]} — ${e.wearerName}`, e.message || 'Open the page and acknowledge.', 'event-' + e.id);
+  updateAlarm();
+}
+
+function updateAlarm() {
+  const e = ringing[0];
+  $('alarm').classList.toggle('on', !!e);
+  if (!e) { siren.stop(); document.title = 'FallBracelet Caregiver'; return; }
+  $('alarmTitle').textContent = e.type === 'SOS' ? 'SOS' : 'FALL';
+  $('alarmWho').textContent = `${e.wearerName} · ${new Date(e.occurredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  $('alarmMsg').textContent = e.message || '';
+  $('alarmMore').textContent = [
+    e.impactG ? `Impact ${Number(e.impactG).toFixed(1)} g` : '',
+    e.batteryPct != null ? `bracelet battery ${e.batteryPct}%` : '',
+    ringing.length > 1 ? `${ringing.length - 1} more waiting` : '',
+  ].filter(Boolean).join(' · ');
+  $('alarmMute').hidden = siren.ready;
+  $('ackBtn').disabled = false;
+  $('ackBtn').textContent = 'Acknowledge';
+  document.title = `⚠ ${e.type} — ${e.wearerName}`;
+  siren.start();
+}
+
+async function acknowledge(id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    await api('POST', `/v1/events/${id}/ack`);
+    ringing = ringing.filter((e) => e.id !== id);
+    for (const w of wearers.values()) {
+      const e = w.events.find((x) => x.id === id);
+      if (e && !e.ackedAt) Object.assign(e, { ackedBy: me || 'you', ackedAt: Date.now() });
+    }
+    updateAlarm();
+    render();
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = `Retry acknowledge (${err.message})`; }
+  }
+}
+
+const siren = {
+  ctx: null, timer: null,
+  unlock() {
+    this.ctx ??= new (window.AudioContext || window.webkitAudioContext)();
+    return this.ctx.resume();
+  },
+  get ready() { return this.ctx?.state === 'running'; },
+  start() {
+    if (this.timer) return;
+    const beep = () => {
+      if (navigator.vibrate) navigator.vibrate([600, 200, 600]);
+      if (!this.ready) return;
+      const t = this.ctx.currentTime, o = this.ctx.createOscillator(), g = this.ctx.createGain();
+      o.type = 'square';
+      o.frequency.setValueAtTime(880, t); o.frequency.setValueAtTime(660, t + 0.4);
+      g.gain.setValueAtTime(0.25, t); g.gain.setValueAtTime(0, t + 0.8);
+      o.connect(g).connect(this.ctx.destination);
+      o.start(t); o.stop(t + 0.8);
+    };
+    beep();
+    this.timer = setInterval(beep, 1400);
+  },
+  stop() { clearInterval(this.timer); this.timer = null; navigator.vibrate?.(0); },
+};
+
+function notify(title, body, tag) {
+  if (!('Notification' in window) || Notification.permission !== 'granted' || document.visibilityState === 'visible') return;
+  try { new Notification(title, { body, tag, requireInteraction: true }); } catch {}
+}
+
+let wakeLock = null;
+async function keepAwake() {
+  try { if ('wakeLock' in navigator && !wakeLock) wakeLock = await navigator.wakeLock.request('screen'); wakeLock?.addEventListener('release', () => (wakeLock = null)); } catch {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && token) keepAwake(); });
+
+async function enableSound() {
+  await siren.unlock().catch(() => {});
+  if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission().catch(() => {});
+  keepAwake();
+  render();
+  if (ringing.length) { siren.stop(); updateAlarm(); }
+}
+
+// --- Rendering ---------------------------------------------------------------------------------
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+function ago(t) {
+  const s = Math.round((Date.now() - t) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} d ago`;
+}
+const when = (t) => new Date(t).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+function wearerHtml(w) {
+  const s = w.status || {};
+  const lastBattery = s.batteryPct ?? w.events.find((e) => e.batteryPct != null)?.batteryPct;
+  const bracelet = s.braceletConnected === true ? 'Connected' : s.braceletConnected === false ? 'Not connected' : 'Unknown';
+  const checkin = w.events.find((e) => e.type === 'CHECKIN');
+  const events = w.events.slice(0, 20).map((e) => {
+    const cls = ALARMS.has(e.type) ? 'bad' : (e.type === 'CHECKIN' || e.type === 'CANCELLED') ? 'ok' : '';
+    const tail = e.ackedAt
+      ? `<div class="seen">Seen by ${esc(e.ackedBy)} ${ago(e.ackedAt)}</div>`
+      : (ALARMS.has(e.type) || e.type === 'TEST') ? `<button class="inline" data-ack="${e.id}">Acknowledge</button>` : '';
+    return `<div class="ev"><div class="row"><span class="pill ${cls}">${esc(LABELS[e.type] || e.type)}</span>
+      <span class="muted small">${when(e.occurredAt)}</span></div>
+      ${e.message ? `<div>${esc(e.message)}</div>` : ''}${tail}</div>`;
+  }).join('');
+  return `<div class="card wearer">
+    <div class="row"><h2 class="grow">${esc(w.name)}</h2>
+      ${w.offline ? '<span class="pill bad">Phone offline</span>' : w.lastHeartbeat ? '<span class="pill ok">Online</span>' : '<span class="pill">No heartbeat yet</span>'}</div>
+    <div class="stats">
+      <div class="stat"><span>Bracelet</span><b>${bracelet}</b></div>
+      <div class="stat"><span>State</span><b>${esc((s.state || '—').toLowerCase().replace(/_/g, ' '))}</b></div>
+      <div class="stat"><span>Battery</span><b>${lastBattery != null ? lastBattery + '%' : '—'}</b>
+        ${lastBattery != null ? `<div class="battery"><i style="width:${Math.max(0, Math.min(100, lastBattery))}%;${lastBattery <= 20 ? 'background:var(--bad)' : ''}"></i></div>` : ''}</div>
+    </div>
+    <div class="muted small">${w.lastHeartbeat ? `Last heard ${ago(w.lastHeartbeat)}` : 'Not heard from yet'} · ${checkin ? `last check-in ${ago(checkin.occurredAt)}` : 'no check-in yet'}</div>
+    <p class="label" style="margin-top:14px">History</p>
+    ${events || '<div class="muted">Nothing yet.</div>'}
+  </div>`;
+}
+
+let linking = false;
+function render() {
+  const linked = !!token;
+  $('who').textContent = linked && me ? `Signed in as ${me}` : 'Gets the bracelet\'s alarms on this device while the page is open.';
+  $('link').hidden = linked && !linking;
+  $('cancelLink').hidden = !linked;
+  $('status').hidden = $('another').hidden = $('signout').hidden = !linked;
+  $('sound').hidden = !linked || siren.ready;
+  $('relay').textContent = location.host;
+  const caps = [];
+  if (!('Notification' in window) || !window.isSecureContext) caps.push('no notifications on plain http');
+  else if (Notification.permission !== 'granted') caps.push('notifications off');
+  if (!('wakeLock' in navigator)) caps.push('screen may sleep');
+  $('caps').textContent = caps.length ? `In this browser: ${caps.join(', ')}. Keep the page open and the screen on.` : '';
+  if (!linked) { $('wearers').innerHTML = ''; return; }
+  $('wearers').innerHTML = wearers.size
+    ? [...wearers.values()].map(wearerHtml).join('')
+    : '<div class="card muted">Not following anyone yet.</div>';
+  if (!$('name').value) $('name').value = me;
+}
+
+// --- Linking -----------------------------------------------------------------------------------
+
+function checkForm() { $('linkBtn').disabled = !(/^\d{6}$/.test($('code').value) && $('name').value.trim()); }
+$('code').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6); checkForm(); });
+$('name').addEventListener('input', checkForm);
+
+$('linkForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const msg = $('linkMsg');
+  $('linkBtn').disabled = true;
+  msg.className = 'msg'; msg.textContent = 'Linking…';
+  enableSound(); // the tap counts as the gesture that lets the page ring later
+  try {
+    const name = $('name').value.trim();
+    const r = await api('POST', '/v1/link', { code: $('code').value, name }, token);
+    if (r.token) { token = r.token; store.set('cg.token', token); me = name; store.set('cg.name', me); }
+    msg.className = 'msg ok'; msg.textContent = `Linked to ${r.wearer.name}.`;
+    $('code').value = '';
+    linking = false;
+    await loadDashboard();
+    if (!streamCtrl || streamCtrl.signal.aborted) stream();
+  } catch (err) {
+    msg.className = 'msg bad';
+    msg.textContent = err.status === 404 ? 'That code is wrong or has expired. Ask for a new one.' : `Couldn't link: ${err.message}`;
+  }
+  checkForm();
+});
+
+function signOut(reason = '') {
+  streamCtrl?.abort();
+  token = null; lastEventId = null; wearers = new Map(); ringing = [];
+  store.set('cg.token', null); store.set('cg.lastEventId', null);
+  updateAlarm();
+  $('linkMsg').className = 'msg bad'; $('linkMsg').textContent = reason;
+  render();
+}
+
+$('another').addEventListener('click', () => { linking = true; $('linkMsg').textContent = ''; render(); $('code').focus(); });
+$('cancelLink').addEventListener('click', () => { linking = false; render(); });
+$('signout').addEventListener('click', () => { if (confirm('Stop getting alarms on this browser?')) signOut(); });
+$('soundBtn').addEventListener('click', enableSound);
+$('ackBtn').addEventListener('click', () => ringing[0] && acknowledge(ringing[0].id, $('ackBtn')));
+$('wearers').addEventListener('click', (e) => { const b = e.target.closest('[data-ack]'); if (b) acknowledge(Number(b.dataset.ack), b); });
+// Any tap on the page also unlocks audio, so a reload followed by a tap is enough.
+document.addEventListener('pointerdown', () => { if (token && !siren.ready) enableSound(); }, { once: false });
+
+setInterval(() => { if (token && !ringing.length) render(); }, 30_000); // keep "x min ago" fresh
+render();
+if (token) stream();
+</script>
+</body>
+</html>
