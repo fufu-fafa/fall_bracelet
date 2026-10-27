@@ -20,11 +20,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -87,7 +90,8 @@ data class WatchedWearer(
     }
 }
 
-enum class StreamState { OFF, CONNECTING, LIVE }
+/** PUSH: no live connection because the dashboard is closed; alarms arrive by FCM. */
+enum class StreamState { OFF, CONNECTING, LIVE, PUSH }
 
 /**
  * Caregiver mode: keeps a live stream open to the relay and rings for FALL and SOS (APP-15, 16, 17).
@@ -110,20 +114,90 @@ class CaregiverManager(
 
     private var streamJob: Job? = null
 
+    /** The caregiver screen is on screen. */
+    private val visible = MutableStateFlow(false)
+    /** The relay has this phone's FCM token, so alarms can wake it without a live connection. */
+    private val _pushReady = MutableStateFlow(false)
+    val pushReady: StateFlow<Boolean> = _pushReady.asStateFlow()
+
+    /** Called by the activity on start and stop. */
+    fun setVisible(on: Boolean) { visible.value = on }
+
+    /**
+     * Push (FCM) wakes the phone for alarms, so the live stream only runs while the dashboard is
+     * open. If push isn't set up (no Google Play services, no internet when linking), the stream
+     * and its foreground service stay on in the background as before: the local-network fallback.
+     */
     fun start() {
+        val link = settings.settings.map { s -> (s.caregiverToken.takeIf { s.mode == AppMode.CAREGIVER }) to s.relayUrl }
+            .distinctUntilChanged()
         scope.launch {
-            settings.settings.map { s -> (s.caregiverToken.takeIf { s.mode == AppMode.CAREGIVER }) to s.relayUrl }
-                .distinctUntilChanged().collect { (token, url) ->
-                    streamJob?.cancel()
-                    if (token == null || url.isBlank()) {
-                        _stream.value = StreamState.OFF
-                        CaregiverService.stop(context)
-                    } else {
-                        CaregiverService.start(context)
-                        streamJob = scope.launch { streamLoop(url, token) }
-                    }
-                }
+            link.collect { (token, url) -> if (token != null && url.isNotBlank()) registerPush() else _pushReady.value = false }
         }
+        scope.launch {
+            combine(link, visible, _pushReady) { (token, url), shown, push ->
+                val linked = token != null && url.isNotBlank()
+                Triple(if (linked && (shown || !push)) url to token!! else null, linked && !push, linked)
+            }.distinctUntilChanged().collect { (wantStream, wantService, _) ->
+                streamJob?.cancel()
+                if (wantService) CaregiverService.start(context) else CaregiverService.stop(context)
+                if (wantStream == null) {
+                    _stream.value = if (_pushReady.value) StreamState.PUSH else StreamState.OFF
+                } else {
+                    streamJob = scope.launch { streamLoop(wantStream.first, wantStream.second) }
+                }
+            }
+        }
+    }
+
+    // --- Push (FCM) ----------------------------------------------------------------------
+
+    /** Gets this phone's FCM token and gives it to the relay. Retries until it sticks. */
+    private suspend fun registerPush() {
+        val token = runCatching { FirebaseMessaging.getInstance().token.await() }
+            .onFailure { Log.w(TAG, "no FCM token, staying on the live stream", it) }
+            .getOrNull() ?: return
+        sendPushToken(token)
+    }
+
+    /** Firebase rotated the token (FcmService.onNewToken). */
+    fun onNewPushToken(token: String) = scope.launch { sendPushToken(token) }
+
+    private suspend fun sendPushToken(token: String) {
+        var backoff = 5_000L
+        while (scope.isActive) {
+            val s = current()
+            if (s.caregiverToken == null || s.relayUrl.isBlank() || s.mode != AppMode.CAREGIVER) return
+            val ok = runCatching { client().put("/v1/push-token", JSONObject().put("token", token)) }
+                .onFailure { Log.w(TAG, "relay didn't take the FCM token: ${it.message}") }.isSuccess
+            if (ok) { _pushReady.value = true; return }
+            delay(backoff)
+            backoff = (backoff * 2).coerceAtMost(5 * 60_000L)
+        }
+    }
+
+    /** A data message from FcmService. Same handling as the stream, so nothing rings twice. */
+    fun handlePush(data: Map<String, String>) {
+        when (data["kind"]) {
+            "event" -> {
+                val e = RemoteEvent(
+                    id = data["id"]?.toLongOrNull() ?: return,
+                    wearerId = data["wearerId"]?.toLongOrNull() ?: 0,
+                    type = runCatching { EventType.valueOf(data["type"].orEmpty()) }.getOrDefault(EventType.UNKNOWN),
+                    batteryPct = data["batteryPct"]?.toIntOrNull() ?: 0,
+                    occurredAt = data["occurredAt"]?.toLongOrNull() ?: System.currentTimeMillis(),
+                    impactG = data["impactG"]?.toFloatOrNull() ?: 0f,
+                    message = data["message"].orEmpty(),
+                    ackedBy = null,
+                    ackedAt = null,
+                )
+                onEvent(e, data["wearerName"].orEmpty(), data["escalated"] == "1", data["escalations"]?.toIntOrNull() ?: 0)
+            }
+            "ack" -> data["eventId"]?.toLongOrNull()?.let { alerts.cancelCaregiverAlarm(it) }
+            "offline" -> data["wearerId"]?.toLongOrNull()?.let { alerts.notifyWearerOffline(it, data["name"].orEmpty()) }
+            "online" -> data["wearerId"]?.toLongOrNull()?.let { alerts.clearWearerOffline(it) }
+        }
+        if (visible.value) scope.launch { runCatching { refresh() } }
     }
 
     private fun client() = current().let { RelayClient(it.relayUrl, it.caregiverToken) }
@@ -211,7 +285,7 @@ class CaregiverManager(
 
     private suspend fun dispatch(type: String, d: JSONObject, id: Long?) {
         when (type) {
-            "event" -> onEvent(RemoteEvent.from(d), d.optString("wearerName"), d.optBoolean("escalated"))
+            "event" -> onEvent(RemoteEvent.from(d), d.optString("wearerName"), d.optBoolean("escalated"), d.optInt("escalations"))
             "status" -> _wearers.update { list ->
                 list.map {
                     if (it.id != d.getLong("wearerId")) it else {
@@ -248,11 +322,17 @@ class CaregiverManager(
         if (id != null && id > current().lastStreamEventId) settings.setLastStreamEventId(id)
     }
 
-    private fun onEvent(e: RemoteEvent, wearerName: String, escalated: Boolean) {
+    /** Alerts already raised, as "eventId:escalations": push and stream can both deliver one. */
+    private val alerted = object : LinkedHashMap<String, Unit>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Unit>) = size > 200
+    }
+
+    private fun onEvent(e: RemoteEvent, wearerName: String, escalated: Boolean, escalations: Int) {
         _wearers.update { l ->
             l.map { w -> if (w.id == e.wearerId) w.copy(events = (listOf(e) + w.events.filter { it.id != e.id })) else w }
         }
         if (e.ackedAt != null) return
+        synchronized(alerted) { if (alerted.put("${e.id}:$escalations", Unit) != null) return }
         when (AlertRules.caregiverAlert(e.type)) {
             CaregiverAlert.ALARM -> alerts.caregiverAlarm(e, wearerName, escalated)
             CaregiverAlert.RING_ONCE -> alerts.caregiverTest(e, wearerName)

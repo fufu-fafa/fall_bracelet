@@ -97,6 +97,7 @@ fun CaregiverScreen(vm: AppViewModel) {
                             when (stream) {
                                 StreamState.LIVE -> Pill("Live", Tokens.Correct, Tokens.CorrectBg)
                                 StreamState.CONNECTING -> Pill("Reconnecting…", Tokens.Muted, Tokens.Border)
+                                StreamState.PUSH -> Pill("Push", Tokens.Correct, Tokens.CorrectBg)
                                 StreamState.OFF -> Pill("Off", Tokens.Wrong, Tokens.WrongBg)
                             }
                         }

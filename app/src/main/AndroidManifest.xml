@@ -64,6 +64,14 @@
             android:turnScreenOn="true"
             android:excludeFromRecents="true" />
 
+        <service
+            android:name=".caregiver.FcmService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".caregiver.AckReceiver"
             android:exported="false" />

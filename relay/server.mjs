@@ -1,6 +1,7 @@
-// FallBracelet relay: the wearer's phone uploads events and heartbeats, caregivers' phones hold a
-// live Server-Sent Events stream and get alarms the moment an event arrives. Replaces Firebase in
-// the PRD with something that runs on a Raspberry Pi. No dependencies beyond Node 22.
+// FallBracelet relay: the wearer's phone uploads events and heartbeats, caregivers' phones get
+// alarms the moment an event arrives, by Firebase Cloud Messaging push (push.mjs) and over a live
+// Server-Sent Events stream while the app is open. Runs on a Raspberry Pi with Node 22; the only
+// dependency is firebase-admin, and without it (or its key) the relay works stream-only.
 //
 //   node --disable-warning=ExperimentalWarning server.mjs      (PORT, DB_PATH env vars optional)
 //
@@ -11,6 +12,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
+import { initPush, push } from './push.mjs';
 
 const PORT = Number(process.env.PORT ?? 8787);
 // Home-network only for now: requests from public addresses are refused. LAN_ONLY=0 lifts it
@@ -52,6 +54,9 @@ db.exec(`
     escalations INTEGER NOT NULL DEFAULT 0,
     UNIQUE (wearer_id, device_address, seq));
   CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS push_tokens (
+    token TEXT PRIMARY KEY, caregiver_id INTEGER NOT NULL REFERENCES caregivers(id) ON DELETE CASCADE,
+    updated_at INTEGER NOT NULL);
   PRAGMA foreign_keys = ON;
 `);
 // Identifies this relay across address changes (e.g. a new hotspot), so phones keep their links.
@@ -95,6 +100,13 @@ const q = {
   unacked: db.prepare(`SELECT * FROM events WHERE type IN ('FALL', 'SOS') AND acked_at IS NULL
     AND escalations < ? AND received_at < ? - ? * (escalations + 1) AND received_at > ?`),
   escalate: db.prepare('UPDATE events SET escalations = escalations + 1 WHERE id = ?'),
+  // One FCM token per caregiver phone; a token that moves to another caregiver follows it.
+  setPushToken: db.prepare(`INSERT INTO push_tokens (token, caregiver_id, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT (token) DO UPDATE SET caregiver_id = excluded.caregiver_id, updated_at = excluded.updated_at`),
+  dropPushTokensOf: db.prepare('DELETE FROM push_tokens WHERE caregiver_id = ? AND token != ?'),
+  dropPushToken: db.prepare('DELETE FROM push_tokens WHERE token = ?'),
+  pushTokensOf: db.prepare(`SELECT p.token FROM links l JOIN push_tokens p ON p.caregiver_id = l.caregiver_id
+    WHERE l.wearer_id = ?`),
 };
 
 // --- Live streams -----------------------------------------------------------------------------
@@ -106,11 +118,13 @@ function send(res, type, data, id) {
   res.write(`${id != null ? `id: ${id}\n` : ''}event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-/** Push to every caregiver linked to this wearer. */
+/** Send to every caregiver linked to this wearer: down open streams, and by FCM push. */
 function fanOut(wearerId, type, data, id) {
   for (const c of q.caregiversOf.all(wearerId)) {
     for (const res of streams.get(c.id) ?? []) send(res, type, data, id);
   }
+  const tokens = q.pushTokensOf.all(wearerId).map((r) => r.token);
+  push(tokens, type, data, (t) => { q.dropPushToken.run(t); console.log('push: dropped a dead token'); });
 }
 
 const eventJson = (e) => ({
@@ -223,6 +237,16 @@ const routes = {
     q.link.run(row.wearer_id, caregiver.id, now());
     const w = db.prepare('SELECT * FROM wearers WHERE id = ?').get(row.wearer_id);
     return { caregiverId: caregiver.id, token, wearer: wearerJson(w) };
+  },
+
+  /** The caregiver phone's FCM token, sent after linking and whenever Firebase rotates it. */
+  'PUT /v1/push-token': async (req) => {
+    const c = caregiverAuth(req);
+    const token = str((await body(req)).token, 4096);
+    if (!token) throw new HttpError(400, 'token required');
+    q.setPushToken.run(token, c.id, now());
+    q.dropPushTokensOf.run(c.id, token); // one phone per caregiver key: the old token is stale
+    return { ok: true };
   },
 
   'GET /v1/caregivers': (req) => ({ caregivers: q.caregiversOf.all(wearerAuth(req).id) }),
@@ -369,4 +393,5 @@ setInterval(() => {
   }
 }, 30_000).unref();
 
+await initPush();
 server.listen(PORT, () => console.log(`relay listening on :${PORT}, db ${DB_PATH}${LAN_ONLY ? ', home network only' : ''}`));

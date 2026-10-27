@@ -19,5 +19,8 @@ keystore.properties
 relay.db*
 *.db
 google-services.json
+firebase-service-account.json
+*-firebase-adminsdk-*.json
+node_modules/
 .env
 *.env

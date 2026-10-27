@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import com.fallbracelet.caregiver
 import com.fallbracelet.ui.theme.FallBraceletTheme
 
 class MainActivity : ComponentActivity() {
@@ -37,6 +38,17 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    // Caregiver mode keeps its live connection only while this is on screen; push covers the rest.
+    override fun onStart() {
+        super.onStart()
+        caregiver.setVisible(true)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        caregiver.setVisible(false)
     }
 
     private fun requiredPermissions(): Array<String> = buildList {

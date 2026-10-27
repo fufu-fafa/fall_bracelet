@@ -1,20 +1,23 @@
 # Relay (Raspberry Pi)
 
-Takes the place of Firebase in the PRD. The wearer's phone uploads events and a heartbeat every
-5 minutes. Each caregiver's phone keeps a live Server-Sent Events stream open and rings the moment
-a FALL or SOS arrives. Node 22 and its built-in SQLite, no packages.
+The wearer's phone uploads events and a heartbeat every 5 minutes. Caregiver phones get alarms by
+Firebase Cloud Messaging push (`push.mjs`), which wakes a locked phone, and over a live
+Server-Sent Events stream while the app or web page is open. Node 22 with its built-in SQLite; the
+one package is `firebase-admin`. Without it, or without the key, the relay runs stream-only.
 
 | | |
 |---|---|
 | `server.mjs` | The relay. `PORT` (default 8787), `DB_PATH` and `LAN_ONLY` (default on) env vars |
 | `web/index.html` | Caregiver mode in a browser, served at `/` (see below) |
+| `push.mjs` | FCM push: high-priority data messages for FALL/SOS and re-pushes, normal for the rest |
 | `test.mjs` | End-to-end test against a throwaway database |
 | `fall-bracelet-relay.service` | systemd unit for the Pi |
 
 ## Run on the Pi
 
 ```bash
-mkdir -p ~/fall-bracelet-relay/web && cp server.mjs test.mjs ~/fall-bracelet-relay/ && cp web/index.html ~/fall-bracelet-relay/web/
+mkdir -p ~/fall-bracelet-relay/web && cp server.mjs push.mjs test.mjs package*.json ~/fall-bracelet-relay/ && cp web/index.html ~/fall-bracelet-relay/web/
+(cd ~/fall-bracelet-relay && npm ci --omit=dev)
 node --disable-warning=ExperimentalWarning ~/fall-bracelet-relay/test.mjs
 sed "s/YOUR_PI_USER/$USER/g" fall-bracelet-relay.service | sudo tee /etc/systemd/system/fall-bracelet-relay.service >/dev/null
 sudo systemctl daemon-reload && sudo systemctl enable --now fall-bracelet-relay
@@ -44,6 +47,21 @@ keeps the screen on only while it is open in the foreground. Notifications and t
 lock need HTTPS, so on plain `http://` on the LAN they're off; the page says what's missing.
 The page is read on every request, so copying a new `web/index.html` needs no restart.
 
+## Push (Firebase Cloud Messaging)
+
+Put the Firebase service-account key on the Pi as `firebase-service-account.json` next to
+`server.mjs` (`chmod 600`, never committed; `FIREBASE_KEY` overrides the path). The log says
+`push: Firebase Cloud Messaging on` at start. The app needs `app/google-services.json` (also kept
+out of git) to build.
+
+The caregiver app sends its FCM token to `PUT /v1/push-token` after linking and whenever Firebase
+rotates it. Every message the relay fans out also goes by push: FALL and SOS (and their re-pushes)
+as high-priority data messages, which open the full-screen alarm; TEST, LOW_BATTERY, OFF and
+offline/online as normal priority. Tokens FCM rejects for good are deleted. Once its token is
+registered the app drops the background live connection and its foreground service, and keeps the
+stream only while the dashboard is open. A phone without push keeps the stream running in the
+background as before.
+
 ## API
 
 Every phone gets a random bearer token; only its SHA-256 is stored.
@@ -59,6 +77,7 @@ Every phone gets a random bearer token; only its SHA-256 is stored.
 | `POST /v1/heartbeat` | wearer | Latest status; reply carries acknowledgements and the caregiver count |
 | `GET /v1/dashboard` | caregiver | Each followed wearer with status and the last 100 events (`?limit=` up to 1000) |
 | `POST /v1/events/:id/ack` | caregiver | "Seen by …" |
+| `PUT /v1/push-token` | caregiver | `{token}`: this phone's FCM token |
 | `GET /v1/stream` | caregiver | SSE: `hello`, `event`, `status`, `ack`, `offline`, `online`, `unlinked`. `Last-Event-ID` replays the last 24 h |
 
 Timers: a wearer with no heartbeat for 15 min is pushed to caregivers as `offline`. A FALL or SOS
