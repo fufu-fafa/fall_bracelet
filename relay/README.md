@@ -57,7 +57,7 @@ Every phone gets a random bearer token; only its SHA-256 is stored.
 | `GET /v1/caregivers`, `DELETE /v1/caregivers/:id` | wearer | List / remove linked caregivers |
 | `POST /v1/events` | wearer | Idempotent on (wearer, deviceAddress, seq) |
 | `POST /v1/heartbeat` | wearer | Latest status; reply carries acknowledgements and the caregiver count |
-| `GET /v1/dashboard` | caregiver | Each followed wearer with status and the last 100 events |
+| `GET /v1/dashboard` | caregiver | Each followed wearer with status and the last 100 events (`?limit=` up to 1000) |
 | `POST /v1/events/:id/ack` | caregiver | "Seen by …" |
 | `GET /v1/stream` | caregiver | SSE: `hello`, `event`, `status`, `ack`, `offline`, `online`, `unlinked`. `Last-Event-ID` replays the last 24 h |
 

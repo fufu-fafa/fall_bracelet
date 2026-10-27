@@ -51,6 +51,13 @@
   .battery i { display: block; height: 100%; background: var(--ok); }
   .ev { padding: 10px 0; border-top: 1px solid var(--border); }
   .ev:first-of-type { border-top: 0; }
+  .tabs { display: flex; gap: 6px; margin: 4px 0 8px; }
+  .tabs button { width: auto; flex: 1; margin: 0; padding: 6px 0; font-size: 14px; }
+  .tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pager { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .pager button { width: 44px; margin: 0; padding: 6px 0; }
+  .pager b { flex: 1; text-align: center; font-size: 15px; }
+  .day { font-size: 13px; font-weight: 600; color: var(--muted); margin: 14px 0 0; }
   .ev .seen { color: var(--ok); font-size: 13px; }
   .banner { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
   .banner button { border-color: var(--bad); color: var(--bad); }
@@ -146,7 +153,7 @@ async function api(method, path, body, auth = token) {
 }
 
 async function loadDashboard() {
-  const d = await api('GET', '/v1/dashboard');
+  const d = await api('GET', '/v1/dashboard?limit=1000'); // enough history to page back through weeks
   wearers = new Map(d.wearers.map((w) => [w.id, w]));
   for (const w of d.wearers) for (const e of w.events) maybeRing({ ...e, wearerName: w.name });
   render();
@@ -333,13 +340,20 @@ function wearerHtml(w) {
   const lastBattery = s.batteryPct ?? w.events.find((e) => e.batteryPct != null)?.batteryPct;
   const bracelet = s.braceletConnected === true ? 'Connected' : s.braceletConnected === false ? 'Not connected' : 'Unknown';
   const checkin = w.events.find((e) => e.type === 'CHECKIN');
-  const events = w.events.slice(0, 20).map((e) => {
+  const v = viewOf(w.id);
+  const [from, to, title] = range(v);
+  const shown = w.events.filter((e) => e.occurredAt >= from && e.occurredAt < to);
+  let lastDay = '';
+  const events = shown.map((e) => {
+    const day = new Date(e.occurredAt).toDateString();
+    const heading = v.mode !== 'day' && day !== lastDay ? `<p class="day">${dayName(e.occurredAt)}</p>` : '';
+    lastDay = day;
     const cls = ALARMS.has(e.type) ? 'bad' : (e.type === 'CHECKIN' || e.type === 'CANCELLED') ? 'ok' : '';
     const tail = e.ackedAt
       ? `<div class="seen">Seen by ${esc(e.ackedBy)} ${ago(e.ackedAt)}</div>`
       : (ALARMS.has(e.type) || e.type === 'TEST') ? `<button class="inline" data-ack="${e.id}">Acknowledge</button>` : '';
-    return `<div class="ev"><div class="row"><span class="pill ${cls}">${esc(LABELS[e.type] || e.type)}</span>
-      <span class="muted small">${when(e.occurredAt)}</span></div>
+    return `${heading}<div class="ev"><div class="row"><span class="pill ${cls}">${esc(LABELS[e.type] || e.type)}</span>
+      <span class="muted small">${v.mode === 'day' ? time(e.occurredAt) : when(e.occurredAt)}</span></div>
       ${e.message ? `<div>${esc(e.message)}</div>` : ''}${tail}</div>`;
   }).join('');
   return `<div class="card wearer">
@@ -353,8 +367,35 @@ function wearerHtml(w) {
     </div>
     <div class="muted small">${w.lastHeartbeat ? `Last heard ${ago(w.lastHeartbeat)}` : 'Not heard from yet'} · ${checkin ? `last check-in ${ago(checkin.occurredAt)}` : 'no check-in yet'}</div>
     <p class="label" style="margin-top:14px">History</p>
-    ${events || '<div class="muted">Nothing yet.</div>'}
+    <div class="tabs">${['day', 'week', 'all'].map((m) =>
+      `<button class="${v.mode === m ? 'on' : ''}" data-view="${w.id}:${m}">${{ day: 'Day', week: 'Week', all: 'All' }[m]}</button>`).join('')}</div>
+    ${v.mode !== 'all' ? `<div class="pager"><button data-step="${w.id}:-1" aria-label="Earlier">‹</button>
+      <b>${title}</b><button data-step="${w.id}:1" aria-label="Later" ${v.offset >= 0 ? 'disabled' : ''}>›</button></div>` : ''}
+    <div class="muted small">${shown.length ? `${shown.length} event${shown.length > 1 ? 's' : ''}` : ''}${shown.filter((e) => ALARMS.has(e.type)).length ? `, ${shown.filter((e) => ALARMS.has(e.type)).length} alarm(s)` : ''}</div>
+    ${events || `<div class="muted">${w.events.length ? 'Nothing in this period.' : 'Nothing yet.'}</div>`}
   </div>`;
+}
+
+// History filter per wearer: one day or one week at a time (offset 0 = today / this week), or all.
+const views = (() => { try { return JSON.parse(store.get('cg.views')) || {}; } catch { return {}; } })();
+const viewOf = (id) => (views[id] ??= { mode: 'day', offset: 0 });
+const saveViews = () => store.set('cg.views', JSON.stringify(views));
+const time = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function startOfDay(t, plusDays = 0) { const d = new Date(t); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + plusDays); return d.getTime(); }
+function dayName(t) {
+  const d = startOfDay(t), today = startOfDay(Date.now());
+  if (d === today) return 'Today';
+  if (d === startOfDay(Date.now(), -1)) return 'Yesterday';
+  return new Date(t).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' });
+}
+/** [from, to, title] for the selected period; weeks run Monday to Sunday. */
+function range(v) {
+  if (v.mode === 'all') return [0, Infinity, 'All'];
+  if (v.mode === 'day') { const from = startOfDay(Date.now(), v.offset); return [from, startOfDay(from, 1), dayName(from)]; }
+  const monday = startOfDay(Date.now(), -((new Date().getDay() + 6) % 7) + 7 * v.offset);
+  const sunday = startOfDay(monday, 6);
+  const fmt = (t) => new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short' });
+  return [monday, startOfDay(monday, 7), v.offset === 0 ? 'This week' : v.offset === -1 ? 'Last week' : `${fmt(monday)} – ${fmt(sunday)}`];
 }
 
 let linking = false;
@@ -420,7 +461,16 @@ $('cancelLink').addEventListener('click', () => { linking = false; render(); });
 $('signout').addEventListener('click', () => { if (confirm('Stop getting alarms on this browser?')) signOut(); });
 $('soundBtn').addEventListener('click', enableSound);
 $('ackBtn').addEventListener('click', () => ringing[0] && acknowledge(ringing[0].id, $('ackBtn')));
-$('wearers').addEventListener('click', (e) => { const b = e.target.closest('[data-ack]'); if (b) acknowledge(Number(b.dataset.ack), b); });
+$('wearers').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-ack]');
+  if (b) return acknowledge(Number(b.dataset.ack), b);
+  const t = e.target.closest('[data-view]'), s = e.target.closest('[data-step]');
+  if (t) { const [id, mode] = t.dataset.view.split(':'); views[id] = { mode, offset: 0 }; }
+  else if (s) { const [id, step] = s.dataset.step.split(':'); const v = viewOf(id); v.offset = Math.min(0, v.offset + Number(step)); }
+  else return;
+  saveViews();
+  render();
+});
 // Any tap on the page also unlocks audio, so a reload followed by a tap is enough.
 document.addEventListener('pointerdown', () => { if (token && !siren.ready) enableSound(); }, { once: false });
 
