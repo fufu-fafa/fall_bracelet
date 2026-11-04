@@ -7,6 +7,9 @@
 namespace battery {
 
 uint16_t readMv() {
+#if PROTOTYPE_NO_BATTERY
+  return 4000;  // pretend ~78 %
+#endif
   uint32_t sum = 0;
   for (int i = 0; i < 16; i++) sum += analogReadMilliVolts(PIN_VBAT);
   return (uint16_t)(sum / 16 * VBAT_DIVIDER);

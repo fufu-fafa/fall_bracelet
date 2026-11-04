@@ -16,6 +16,11 @@
 #define PIN_SCL      D5   // GPIO7
 #define VBAT_DIVIDER 2.0f // VBAT = pin voltage × this
 
+// Breadboard prototype with no battery divider on D0 (e.g. ESP32 + MPU6050 on USB power).
+// Without this the empty D0 reads as a flat battery and the firmware switches itself off.
+// Set back to 0 for the real board.
+#define PROTOTYPE_NO_BATTERY 0
+
 // ---- Sampling ------------------------------------------------------------------------------
 #define SAMPLE_HZ         100
 #define ACC_RANGE_G       8
