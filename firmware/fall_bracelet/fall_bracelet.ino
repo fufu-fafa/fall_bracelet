@@ -7,6 +7,9 @@
 
 #include <Arduino.h>
 #include <driver/gpio.h>
+#if CONFIG_IDF_TARGET_ESP32
+#include <driver/rtc_io.h>
+#endif
 #include <esp_sleep.h>
 #include <math.h>
 #include <sys/time.h>
@@ -101,9 +104,16 @@ void raiseAlarm(EventType type, float impactG, uint32_t now) {
   delay(50);
 
   // TODO: SW2 needs a pull-up that holds in deep sleep; an external 100 kΩ is the safe choice.
+#if CONFIG_IDF_TARGET_ESP32
+  // The classic ESP32 wakes through its RTC domain: ext0 for the button, ext1 for INT.
+  rtc_gpio_pullup_en((gpio_num_t)PIN_BUTTON);
+  esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BUTTON, 0);
+  if (reason == SLEPT_IDLE) esp_sleep_enable_ext1_wakeup(1ULL << PIN_MPU_INT, ESP_EXT1_WAKEUP_ANY_HIGH);
+#else
   gpio_pullup_en((gpio_num_t)PIN_BUTTON);
   esp_deep_sleep_enable_gpio_wakeup(1ULL << PIN_BUTTON, ESP_GPIO_WAKEUP_GPIO_LOW);
   if (reason == SLEPT_IDLE) esp_deep_sleep_enable_gpio_wakeup(1ULL << PIN_MPU_INT, ESP_GPIO_WAKEUP_GPIO_HIGH);
+#endif
   esp_deep_sleep_start();
 }
 
@@ -322,10 +332,14 @@ void setup() {
   Serial.begin(115200);
   motor::begin();
   storage::begin();
+#if CONFIG_IDF_TARGET_ESP32
+  rtc_gpio_deinit((gpio_num_t)PIN_BUTTON);  // hand the pin back from the RTC domain after sleep
+#endif
   pinMode(PIN_BUTTON, INPUT_PULLUP);
 
   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-  bool wokeByPin = cause == ESP_SLEEP_WAKEUP_GPIO;
+  bool wokeByPin = cause == ESP_SLEEP_WAKEUP_GPIO || cause == ESP_SLEEP_WAKEUP_EXT0 ||
+                   cause == ESP_SLEEP_WAKEUP_EXT1;
   bool fromOff = wokeByPin && sleepReason == SLEPT_OFF;
   bool fromIdle = wokeByPin && sleepReason == SLEPT_IDLE;
 

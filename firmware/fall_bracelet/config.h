@@ -5,7 +5,10 @@
 #pragma once
 #include <Arduino.h>
 
-// ---- Pins (Seeed XIAO ESP32-C3) ------------------------------------------------------------
+// ---- Pins ----------------------------------------------------------------------------------
+// Picked by the board selected in the IDE.
+#if CONFIG_IDF_TARGET_ESP32C3
+// Seeed XIAO ESP32-C3 (the v3 bracelet).
 // TODO: check every pin against the v3 schematic. The button and the MPU6050 INT line must be
 // on GPIO0–GPIO5, the only pins that can wake the ESP32-C3 from deep sleep.
 #define PIN_VBAT     D0   // GPIO2, battery divider
@@ -14,10 +17,23 @@
 #define PIN_MOTOR    D3   // GPIO5, motor driver transistor
 #define PIN_SDA      D4   // GPIO6
 #define PIN_SCL      D5   // GPIO7
+#elif CONFIG_IDF_TARGET_ESP32
+// ESP32 DevKit V1 / DevKitC (ESP32-WROOM-32), board "ESP32 Dev Module", for prototyping.
+// The silkscreen "Dx" means GPIOx. Never use GPIO6–11 (flash). The button and INT must be RTC
+// GPIOs (0, 2, 4, 12–15, 25–27, 32–39) to wake from deep sleep.
+#define PIN_VBAT     34   // D34, ADC1 (ADC2 pins misread while the radio is on)
+#define PIN_BUTTON   33   // D33, to GND
+#define PIN_MPU_INT  2    // D2, MPU6050 INT, active high (also drives the blue LED)
+#define PIN_MOTOR    26   // D26, motor driver transistor
+#define PIN_SDA      4    // D4
+#define PIN_SCL      5    // D5
+#else
+#error "Pins are only defined for the XIAO ESP32-C3 and the classic ESP32 DevKit"
+#endif
 #define VBAT_DIVIDER 2.0f // VBAT = pin voltage × this
 
-// Breadboard prototype with no battery divider on D0 (e.g. ESP32 + MPU6050 on USB power).
-// Without this the empty D0 reads as a flat battery and the firmware switches itself off.
+// Breadboard prototype with no battery divider on PIN_VBAT (e.g. ESP32 + MPU6050 on USB power).
+// Without this the empty pin reads as a flat battery and the firmware switches itself off.
 // Set back to 0 for the real board.
 #define PROTOTYPE_NO_BATTERY 0
 

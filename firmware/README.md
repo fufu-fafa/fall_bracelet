@@ -31,6 +31,22 @@ The wire format is in [`../PROTOCOL.md`](../PROTOCOL.md).
 arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32C3 firmware/fall_bracelet
 ```
 
+### Prototyping on an ESP32 DevKit
+
+The sketch also builds for a classic ESP32 DevKit (ESP32-WROOM-32): pick the board
+**ESP32 Dev Module** and `config.h` switches to the DevKit pins. The silkscreen "Dx" means GPIOx.
+
+| MPU6050 | DevKit | Other parts (optional) | DevKit |
+|---|---|---|---|
+| VCC | 3V3 | Button to GND | D33 |
+| GND | GND | Motor transistor | D26 |
+| SDA | D4 | Battery divider | D34 |
+| SCL | D5 | | |
+| INT | D2 | | |
+
+With nothing on D34, set `PROTOTYPE_NO_BATTERY` to 1. If an upload won't start, unplug INT
+from D2 (GPIO2 must be low at boot) or hold BOOT while it connects.
+
 ## Before trusting it
 
 - **Pins are placeholders.** SW2 and the MPU6050 INT line must sit on GPIO0–5 to wake the
