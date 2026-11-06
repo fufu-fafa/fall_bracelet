@@ -42,7 +42,7 @@ Full UUIDs are `7a1f000X-6b2c-4e3d-9f10-a1b2c3d4e5f6`.
 
 | Offset | Type | Field |
 |---|---|---|
-| 0 | u32 | seq — monotonic, survives reboots (stored in NVS) |
+| 0 | u32 | seq — monotonic, survives reboots (stored in NVS); fresh storage starts at a random number, never 1, so a wiped bracelet can't reuse old numbers |
 | 4 | u8 | type: 1 FALL, 2 SOS, 3 LOW_BATTERY, 4 OFF, 5 CHECKIN, 6 CANCELLED, 7 ON, 8 TEST |
 | 5 | u8 | battery % when it happened |
 | 6 | u32 | Unix time when it happened (0 = clock was not set; phone uses receive time) |

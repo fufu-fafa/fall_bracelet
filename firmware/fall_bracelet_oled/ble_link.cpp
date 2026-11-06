@@ -17,6 +17,8 @@ NimBLECharacteristic* chStream = nullptr;
 
 QueueHandle_t inbox = nullptr;
 volatile bool isConnected = false;
+volatile uint16_t connHandle = BLE_HS_CONN_HANDLE_NONE;
+volatile uint32_t connectedAt = 0;
 volatile bool eventsSubscribed = false;
 volatile bool streamOn = false;
 volatile uint32_t ackedSeq = 0;  // written on the BLE task, handled in deliver()
@@ -42,6 +44,8 @@ void send(const BleMessage& m) { xQueueSend(inbox, &m, 0); }
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* s, NimBLEConnInfo& info) override {
     isConnected = true;
+    connHandle = info.getConnHandle();
+    connectedAt = millis();
     // 30–60 ms interval, up to 4 s supervision timeout: responsive but easy on the battery.
     s->updateConnParams(info.getConnHandle(), 24, 48, 0, 400);
   }
@@ -187,6 +191,8 @@ void deliver(uint32_t now) {
     tries = 0;
     return;
   }
+  // A bonded phone's subscription is restored on connect, before the app is listening.
+  if (now - connectedAt < EVENT_START_DELAY_MS) return;
 
   bool due;
   if (inFlightSeq != f->seq) {
@@ -202,7 +208,9 @@ void deliver(uint32_t now) {
   if (!due) return;
 
   chEvent->setValue((const uint8_t*)f, sizeof(EventRecord));
-  chEvent->indicate();
+  // Straight to the connection: the no-argument indicate() goes through NimBLE's update queue,
+  // where retries of an event stalled without any error and blocked the whole queue.
+  chEvent->indicate((const uint8_t*)f, sizeof(EventRecord), connHandle);
   inFlightSeq = f->seq;
   sentAt = now;
   tries++;

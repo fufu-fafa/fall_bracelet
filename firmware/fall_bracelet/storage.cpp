@@ -1,6 +1,7 @@
 #include "storage.h"
 
 #include <Preferences.h>
+#include <esp_random.h>
 #include <string.h>
 #include <time.h>
 
@@ -48,7 +49,7 @@ void begin() {
   memset(current.wearerName, 0, sizeof(current.wearerName));
   prefs.getString("name", current.wearerName, sizeof(current.wearerName));
 
-  nextSeq = prefs.getUInt("seq", 1);
+  nextSeq = prefs.getUInt("seq", 0);  // 0: fresh storage, push() picks the start
   queued = prefs.getUShort("queued", 0);
   if (queued > EVENT_QUEUE_MAX) queued = 0;
   if (queued) prefs.getBytes("queue", queue, queued * sizeof(EventRecord));
@@ -66,6 +67,10 @@ void saveSettings() {
 
 uint32_t push(EventType type, uint8_t batteryPct, uint16_t impactCg, uint8_t alarms24h,
               uint8_t cancelled24h) {
+  // Phones and the relay drop a repeated (device, seq) as a resend, so a wiped bracelet must not
+  // reuse old numbers: fresh storage starts at a random point instead of 1. Picked here, not in
+  // begin(), because esp_random() is only truly random once Bluetooth is on.
+  if (nextSeq == 0) nextSeq = 1000000 + esp_random() % 2000000000UL;
   if (queued == EVENT_QUEUE_MAX) dropOne();
   time_t now = time(nullptr);
   EventRecord& e = queue[queued++];

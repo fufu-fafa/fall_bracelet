@@ -78,6 +78,7 @@
 #define ALERT_RETRIES         3     // resends, ALERT_ACK_TIMEOUT_MS apart
 #define ALERT_ACK_TIMEOUT_MS  10000
 #define ALERT_RETRY_MIN       5
+#define EVENT_START_DELAY_MS  3000  // after connecting, so the app is listening before the first send
 #define ALERT_FAILED_AFTER_MS 30000 // buzz "failed" once an alarm has waited this long
 #define CHECKIN_HOUR_DEFAULT  8     // (setup)
 #define CHECKIN_MIN_DEFAULT   0     // (setup)
