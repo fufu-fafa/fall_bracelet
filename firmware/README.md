@@ -47,6 +47,33 @@ The sketch also builds for a classic ESP32 DevKit (ESP32-WROOM-32): pick the boa
 With nothing on D34, set `PROTOTYPE_NO_BATTERY` to 1. If an upload won't start, unplug INT
 from D2 (GPIO2 must be low at boot) or hold BOOT while it connects.
 
+### DevKit with a 0.96" I2C OLED (`fall_bracelet_oled/`)
+
+A copy of `fall_bracelet/` that adds a 128×64 SSD1306 status display (`display.*`). The rest of
+the firmware and the BLE protocol are the same, so it works with the app unchanged. Fixes to
+the shared files need making in both folders.
+
+| OLED | DevKit |
+|---|---|
+| VCC | 3V3 |
+| GND | GND |
+| SDA | D4 (with the MPU6050's SDA) |
+| SCL | D5 (with the MPU6050's SCL) |
+
+It needs the **Adafruit SSD1306** and **Adafruit GFX** libraries as well.
+
+```bash
+arduino-cli compile --fqbn esp32:esp32:esp32 firmware/fall_bracelet_oled
+```
+
+The header shows BLE link, time (once the phone has set it) and battery ("USB" with
+`PROTOTYPE_NO_BATTERY`). Below it is the current state: a scrolling graph while monitoring, the
+countdown after a fall, or the alert's delivery status. The graph plots total acceleration
+over the last 6.4 s, from 0 g at the bottom to 4 g at the top, with dotted lines at 1 g (at
+rest) and the impact threshold. The text shows the current value and the peak on screen. If the screen stays blank and the
+serial port says `OLED not found`, try `OLED_ADDR` 0x3D. The bracelet keeps running without
+the display. The panel draws several mA while on, so this build is for the breadboard only.
+
 ## Before trusting it
 
 - **Pins are placeholders.** SW2 and the MPU6050 INT line must sit on GPIO0–5 to wake the

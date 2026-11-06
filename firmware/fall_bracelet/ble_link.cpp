@@ -30,11 +30,11 @@ bool failing = false;
 uint16_t streamCounter = 0;
 
 #if BLE_REQUIRE_BONDING
-constexpr uint32_t READ = NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::READ_ENC;
-constexpr uint32_t WRITE = NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC;
+constexpr uint32_t PROP_READ = NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::READ_ENC;
+constexpr uint32_t PROP_WRITE = NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC;
 #else
-constexpr uint32_t READ = NIMBLE_PROPERTY::READ;
-constexpr uint32_t WRITE = NIMBLE_PROPERTY::WRITE;
+constexpr uint32_t PROP_READ = NIMBLE_PROPERTY::READ;
+constexpr uint32_t PROP_WRITE = NIMBLE_PROPERTY::WRITE;
 #endif
 
 void send(const BleMessage& m) { xQueueSend(inbox, &m, 0); }
@@ -110,13 +110,13 @@ void begin() {
   server->setCallbacks(&serverCallbacks);
   NimBLEService* svc = server->createService(UUID_SERVICE);
 
-  chStatus = svc->createCharacteristic(UUID_STATUS, READ | NIMBLE_PROPERTY::NOTIFY);
-  chEvent = svc->createCharacteristic(UUID_EVENT, READ | NIMBLE_PROPERTY::INDICATE);
-  chConfig = svc->createCharacteristic(UUID_CONFIG, READ | WRITE);
+  chStatus = svc->createCharacteristic(UUID_STATUS, PROP_READ | NIMBLE_PROPERTY::NOTIFY);
+  chEvent = svc->createCharacteristic(UUID_EVENT, PROP_READ | NIMBLE_PROPERTY::INDICATE);
+  chConfig = svc->createCharacteristic(UUID_CONFIG, PROP_READ | PROP_WRITE);
   chStream = svc->createCharacteristic(UUID_STREAM, NIMBLE_PROPERTY::NOTIFY);
-  NimBLECharacteristic* chAck = svc->createCharacteristic(UUID_EVENT_ACK, WRITE);
-  NimBLECharacteristic* chTime = svc->createCharacteristic(UUID_TIME, WRITE);
-  NimBLECharacteristic* chCommand = svc->createCharacteristic(UUID_COMMAND, WRITE);
+  NimBLECharacteristic* chAck = svc->createCharacteristic(UUID_EVENT_ACK, PROP_WRITE);
+  NimBLECharacteristic* chTime = svc->createCharacteristic(UUID_TIME, PROP_WRITE);
+  NimBLECharacteristic* chCommand = svc->createCharacteristic(UUID_COMMAND, PROP_WRITE);
   for (NimBLECharacteristic* c : {chEvent, chConfig, chAck, chTime, chCommand}) c->setCallbacks(&writeCallbacks);
   svc->start();
 

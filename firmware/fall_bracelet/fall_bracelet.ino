@@ -27,6 +27,7 @@
 
 // ---- Kept across deep sleep ----------------------------------------------------------------
 enum SleepReason : uint8_t { SLEPT_NONE = 0, SLEPT_OFF = 1, SLEPT_IDLE = 2 };
+[[noreturn]] void deepSleep(SleepReason reason);
 RTC_DATA_ATTR uint8_t sleepReason = SLEPT_NONE;
 RTC_DATA_ATTR int16_t utcOffsetMin = 0;
 RTC_DATA_ATTR uint8_t alarms24h = 0;

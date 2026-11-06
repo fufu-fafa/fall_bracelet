@@ -35,7 +35,7 @@
 // Breadboard prototype with no battery divider on PIN_VBAT (e.g. ESP32 + MPU6050 on USB power).
 // Without this the empty pin reads as a flat battery and the firmware switches itself off.
 // Set back to 0 for the real board.
-#define PROTOTYPE_NO_BATTERY 0
+#define PROTOTYPE_NO_BATTERY 1
 
 // ---- Sampling ------------------------------------------------------------------------------
 #define SAMPLE_HZ         100
