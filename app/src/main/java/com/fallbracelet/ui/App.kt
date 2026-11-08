@@ -28,6 +28,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -139,8 +140,14 @@ private fun PairScreen(vm: AppViewModel, enableBluetooth: () -> Unit) {
                 }
                 items(found, key = { it.address }) { d -> DeviceRow(d) { vm.pair(d) } }
             }
-            OutlinedButton(onClick = vm::startScan, modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                Text("Search again")
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = vm::startScan, modifier = Modifier.fillMaxWidth()) {
+                    Text("Search again")
+                }
+                // Nothing is paired yet, so there's nothing to confirm before switching.
+                TextButton(onClick = { vm.setMode(AppMode.CAREGIVER) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Use this phone as a caregiver instead")
+                }
             }
         }
     }
