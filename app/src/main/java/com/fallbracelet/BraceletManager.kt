@@ -29,7 +29,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -92,6 +94,7 @@ class BraceletManager(
             }
         }
         scope.launch { connection.status.filterNotNull().collect { lastKnownState = it.state } }
+        scope.launch { reportLinkChanges() }
         scope.launch { watchOffline() }
         scope.launch { relayLoop() }
         scope.launch {
@@ -124,6 +127,19 @@ class BraceletManager(
                 _relayError.value = result.exceptionOrNull()?.message
             }
             delay(60_000)
+        }
+    }
+
+    /**
+     * A bracelet that loses power can't say so, so caregivers hear it from this phone. Waits for the
+     * link to settle, so a brief Bluetooth dropout doesn't show up as a change.
+     */
+    private suspend fun reportLinkChanges() {
+        connection.link.map { it == LinkState.CONNECTED }.distinctUntilChanged().drop(1).collectLatest {
+            delay(LINK_SETTLE_MS)
+            if (appSettings.value.mode == AppMode.WEARER && relay.configured) {
+                _relayError.value = runCatching { heartbeat() }.exceptionOrNull()?.message
+            }
         }
     }
 
@@ -231,5 +247,6 @@ class BraceletManager(
     private companion object {
         const val NOTIFY_BASE = 1000
         const val HEARTBEAT_MS = 5 * 60_000L
+        const val LINK_SETTLE_MS = 20_000L
     }
 }

@@ -301,11 +301,12 @@ class CaregiverManager(
                 list.map {
                     if (it.id != d.getLong("wearerId")) it else {
                         val st = d.getJSONObject("status")
+                        // Replaces the old status: with no bracelet connected, state and battery aren't known.
                         it.copy(
                             offline = false, lastHeartbeat = d.getLong("at"),
                             braceletConnected = st.optBoolean("braceletConnected"),
-                            state = st.optString("state").takeIf { s -> s.isNotEmpty() } ?: it.state,
-                            batteryPct = if (st.has("batteryPct")) st.getInt("batteryPct") else it.batteryPct,
+                            state = st.optString("state").takeIf { s -> s.isNotEmpty() },
+                            batteryPct = if (st.has("batteryPct")) st.getInt("batteryPct") else null,
                         )
                     }
                 }

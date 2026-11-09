@@ -1,6 +1,6 @@
 # Relay (Raspberry Pi)
 
-The wearer's phone uploads events and a heartbeat every 5 minutes. Caregiver phones get alarms by
+The wearer's phone uploads events and a heartbeat every 5 minutes, and as soon as the bracelet connects or drops. Caregiver phones get alarms by
 Firebase Cloud Messaging push (`push.mjs`), which wakes a locked phone, and over a live
 Server-Sent Events stream while the app or web page is open. Node 22 with its built-in SQLite; the
 one package is `firebase-admin`. Without it, or without the key, the relay runs stream-only.
