@@ -19,6 +19,31 @@ import com.fallbracelet.caregiver
 import com.fallbracelet.ui.MainActivity
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * Android kills the app if a service started with startForegroundService() is stopped before it
+ * has called startForeground(). That happens when push connects right after the service was asked
+ * for, so a stop that arrives during startup is left for the service to carry out itself.
+ */
+internal class ForegroundStartGate {
+    private val pending = AtomicInteger()
+    @Volatile private var wanted = false
+
+    fun onStartRequested() {
+        wanted = true
+        pending.incrementAndGet()
+    }
+
+    /** A requested start reached startForeground(), or failed. True: nothing wants the service now. */
+    fun onStartFinished(): Boolean = pending.updateAndGet { (it - 1).coerceAtLeast(0) } == 0 && !wanted
+
+    /** True when it's safe to stop the service from outside. */
+    fun onStopRequested(): Boolean {
+        wanted = false
+        return pending.get() == 0
+    }
+}
 
 /** Keeps the caregiver's live stream to the relay open in the background, like a messaging app. */
 class CaregiverService : LifecycleService() {
@@ -31,6 +56,7 @@ class CaregiverService : LifecycleService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        val requested = intent != null // null: the system restarted us, nobody called start()
         try {
             ServiceCompat.startForeground(
                 this, AlertDispatcher.CAREGIVER_SERVICE_ID, notification("Connecting to the relay…"),
@@ -38,7 +64,13 @@ class CaregiverService : LifecycleService() {
             )
         } catch (e: Exception) {
             Log.w(TAG, "Could not start in foreground", e)
-            stopSelf()
+            if (requested) gate.onStartFinished()
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        // stopSelf(startId) does nothing if a newer start is already on its way.
+        if (requested && gate.onStartFinished()) {
+            stopSelf(startId)
             return START_NOT_STICKY
         }
         if (!started) {
@@ -72,13 +104,19 @@ class CaregiverService : LifecycleService() {
     companion object {
         private const val TAG = "CaregiverService"
 
+        private val gate = ForegroundStartGate()
+
         fun start(context: Context) {
+            gate.onStartRequested()
             runCatching { ContextCompat.startForegroundService(context, Intent(context, CaregiverService::class.java)) }
-                .onFailure { Log.w(TAG, "start failed", it) }
+                .onFailure {
+                    Log.w(TAG, "start failed", it)
+                    gate.onStartFinished()
+                }
         }
 
         fun stop(context: Context) {
-            context.stopService(Intent(context, CaregiverService::class.java))
+            if (gate.onStopRequested()) context.stopService(Intent(context, CaregiverService::class.java))
         }
     }
 }
