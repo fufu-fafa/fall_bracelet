@@ -178,6 +178,8 @@ class CaregiverManager(
 
     /** A data message from FcmService. Same handling as the stream, so nothing rings twice. */
     fun handlePush(data: Map<String, String>) {
+        // The relay keeps the FCM token after a sign-out or a switch to wearer mode.
+        if (current().caregiverToken == null || current().mode != AppMode.CAREGIVER) return
         when (data["kind"]) {
             "event" -> {
                 val e = RemoteEvent(
@@ -216,8 +218,17 @@ class CaregiverManager(
     suspend fun findRelay(): String? = finder.findNow()?.url
 
     suspend fun refresh() {
-        val a = client().get("/v1/dashboard").getJSONArray("wearers")
+        val a = client().get("/v1/dashboard?limit=1000").getJSONArray("wearers")
         _wearers.value = List(a.length()) { WatchedWearer.from(a.getJSONObject(it)) }
+    }
+
+    /** Stops alarms on this phone, like the web page's sign-out. The name is kept for the next link. */
+    suspend fun signOut() {
+        _wearers.value.flatMap { it.events }.filter { it.type.isAlarm && it.ackedAt == null }
+            .forEach { alerts.cancelCaregiverAlarm(it.id) }
+        settings.clearCaregiverLink()
+        _wearers.value = emptyList()
+        _error.value = null
     }
 
     fun acknowledge(eventId: Long) = scope.launch {
@@ -329,7 +340,13 @@ class CaregiverManager(
 
     private fun onEvent(e: RemoteEvent, wearerName: String, escalated: Boolean, escalations: Int) {
         _wearers.update { l ->
-            l.map { w -> if (w.id == e.wearerId) w.copy(events = (listOf(e) + w.events.filter { it.id != e.id })) else w }
+            l.map { w ->
+                if (w.id != e.wearerId) w else w.copy(
+                    events = (listOf(e) + w.events.filter { it.id != e.id })
+                        .sortedWith(compareByDescending<RemoteEvent> { it.occurredAt }.thenByDescending { it.id }),
+                    batteryPct = if (e.batteryPct > 0) e.batteryPct else w.batteryPct,
+                )
+            }
         }
         if (e.ackedAt != null) return
         synchronized(alerted) { if (alerted.put("${e.id}:$escalations", Unit) != null) return }

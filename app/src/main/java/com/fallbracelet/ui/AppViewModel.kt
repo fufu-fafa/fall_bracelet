@@ -12,6 +12,7 @@ import com.fallbracelet.caregiver
 import com.fallbracelet.relay.Invite
 import com.fallbracelet.relay.RelayDiscovery
 import com.fallbracelet.relay.LinkedCaregiver
+import com.fallbracelet.relay.RelayException
 import kotlinx.coroutines.flow.combine
 import com.fallbracelet.manager
 import kotlinx.coroutines.Job
@@ -149,7 +150,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val linkResult: StateFlow<String?> = _linkResult.asStateFlow()
 
     fun link(url: String, code: String, name: String) = viewModelScope.launch {
-        _linkResult.value = cg.link(url, code, name).fold({ "Linked to $it" }, { "Couldn't link: ${it.message}" })
+        _linkResult.value = cg.link(url, code, name).fold({ "Linked to $it" }, {
+            if ((it as? RelayException)?.status == 404) "That code is wrong or has expired. Ask for a new one."
+            else "Couldn't link: ${it.message}"
+        })
+    }
+
+    fun clearLinkResult() { _linkResult.value = null }
+
+    fun signOutCaregiver() = viewModelScope.launch {
+        cg.signOut()
+        clearLinkResult()
     }
 
     fun acknowledge(eventId: Long) = cg.acknowledge(eventId)

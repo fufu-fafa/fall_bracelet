@@ -118,6 +118,10 @@ class SettingsRepository(private val context: Context) {
         if (token != null) it[Keys.caregiverToken] = token
         it[Keys.caregiverName] = name
     }
+    suspend fun clearCaregiverLink() = edit {
+        it.remove(Keys.caregiverToken)
+        it.remove(Keys.lastStreamEventId)
+    }
     suspend fun setAcksSince(at: Long) = edit { it[Keys.acksSince] = at }
     suspend fun setLastStreamEventId(id: Long) = edit { it[Keys.lastStreamEventId] = id }
 

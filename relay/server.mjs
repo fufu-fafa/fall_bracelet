@@ -286,7 +286,7 @@ const routes = {
 
   'GET /v1/dashboard': (req) => {
     const c = caregiverAuth(req);
-    // The app shows the last 100; the web page asks for more so it can page back through weeks.
+    // The app and the web page ask for up to 1000 so they can page back through weeks.
     const limit = Math.min(Math.max(int(new URL(req.url, 'http://x').searchParams.get('limit') ?? 100) || 100, 1), 1000);
     return {
       wearers: q.wearersOf.all(c.id).map((w) => ({

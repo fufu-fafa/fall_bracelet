@@ -1,0 +1,65 @@
+package com.fallbracelet
+
+import com.fallbracelet.caregiver.HistoryMode
+import com.fallbracelet.caregiver.ago
+import com.fallbracelet.caregiver.dayName
+import com.fallbracelet.caregiver.historyPeriod
+import org.junit.Assert.assertEquals
+import org.junit.Test
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.ZonedDateTime
+
+/** The caregiver history periods, matching the web page's range(). */
+class HistoryViewTest {
+    private val zone = ZoneId.of("Asia/Jakarta")
+    private fun at(y: Int, m: Int, d: Int, h: Int = 0) =
+        ZonedDateTime.of(y, m, d, h, 0, 0, 0, zone).toInstant().toEpochMilli()
+
+    // Monday 9 Nov 2026
+    private val now = at(2026, 11, 9, 15)
+
+    @Test fun todayRunsMidnightToMidnight() {
+        val p = historyPeriod(HistoryMode.DAY, 0, now, zone)
+        assertEquals(at(2026, 11, 9), p.from)
+        assertEquals(at(2026, 11, 10), p.until)
+        assertEquals("Today", p.title)
+    }
+
+    @Test fun yesterdayIsOneStepBack() {
+        val p = historyPeriod(HistoryMode.DAY, -1, now, zone)
+        assertEquals(at(2026, 11, 8), p.from)
+        assertEquals("Yesterday", p.title)
+    }
+
+    @Test fun weekStartsOnMondayEvenOnASunday() {
+        val sunday = at(2026, 11, 15, 23)
+        val p = historyPeriod(HistoryMode.WEEK, 0, sunday, zone)
+        assertEquals(at(2026, 11, 9), p.from)
+        assertEquals(at(2026, 11, 16), p.until)
+        assertEquals("This week", p.title)
+    }
+
+    @Test fun earlierWeeksStepBackAWeekAtATime() {
+        assertEquals("Last week", historyPeriod(HistoryMode.WEEK, -1, now, zone).title)
+        assertEquals(at(2026, 10, 26), historyPeriod(HistoryMode.WEEK, -2, now, zone).from)
+    }
+
+    @Test fun allHasNoLimits() {
+        val p = historyPeriod(HistoryMode.ALL, 0, now, zone)
+        assertEquals(0L, p.from)
+        assertEquals(Long.MAX_VALUE, p.until)
+    }
+
+    @Test fun olderDaysAreNamed() {
+        val today = LocalDate.of(2026, 11, 9)
+        assertEquals(true, dayName(today.minusDays(3), today).contains("6"))
+    }
+
+    @Test fun agoMatchesTheWebWording() {
+        assertEquals("just now", ago(now - 30_000, now))
+        assertEquals("5 min ago", ago(now - 5 * 60_000, now))
+        assertEquals("3 h ago", ago(now - 3 * 3_600_000, now))
+        assertEquals("2 d ago", ago(now - 2 * 86_400_000, now))
+    }
+}
